@@ -40,15 +40,18 @@ function getValue(row: Record<string, any>, keys: string[]) {
     const found = normalizedEntries.find(([k]) => k === wanted);
     if (found) return found[1];
   }
+
   return undefined;
 }
 
 function toNumber(value: any, fallback = 0) {
   if (value === undefined || value === null || value === "") return fallback;
+
   const cleaned =
     typeof value === "string"
       ? value.replace(/\$/g, "").replace(/\./g, "").replace(/,/g, ".").trim()
       : value;
+
   const n = Number(cleaned);
   return Number.isFinite(n) ? n : fallback;
 }
@@ -56,10 +59,12 @@ function toNumber(value: any, fallback = 0) {
 function toBoolean(value: any) {
   if (typeof value === "boolean") return value;
   if (typeof value === "number") return value > 0;
+
   if (typeof value === "string") {
     const v = value.toLowerCase().trim();
     return ["true", "1", "si", "sí", "yes", "ok", "con", "activo"].includes(v);
   }
+
   return false;
 }
 
@@ -92,53 +97,70 @@ export default function Productos() {
   }, []);
 
   const categories = useMemo(() => {
-    const u = Array.from(new Set(products.map((p) => p.category)));
-    return ["Todas", ...u.sort()];
+    const unique = Array.from(new Set(products.map((p) => p.category)));
+    return ["Todas", ...unique.sort()];
   }, [products]);
 
   const filteredProducts = useMemo(() => {
-    let r = [...products];
+    let result = [...products];
 
     if (search.trim()) {
-      const t = search.toLowerCase();
-      r = r.filter(
+      const term = search.toLowerCase();
+      result = result.filter(
         (p) =>
-          p.name.toLowerCase().includes(t) ||
-          p.sku.toLowerCase().includes(t),
+          p.name.toLowerCase().includes(term) ||
+          p.sku.toLowerCase().includes(term),
       );
     }
 
-    if (category !== "Todas") r = r.filter((p) => p.category === category);
-    if (stockFilter === "Con stock") r = r.filter((p) => p.stock > 0);
-    if (stockFilter === "Sin stock") r = r.filter((p) => p.stock === 0);
-    if (stockFilter === "Bajo stock") r = r.filter((p) => p.stock > 0 && p.stock <= 5);
-    if (offerFilter === "Con oferta") r = r.filter((p) => !!p.discount);
-    if (offerFilter === "Sin oferta") r = r.filter((p) => !p.discount);
+    if (category !== "Todas") {
+      result = result.filter((p) => p.category === category);
+    }
+
+    if (stockFilter === "Con stock") {
+      result = result.filter((p) => p.stock > 0);
+    }
+
+    if (stockFilter === "Sin stock") {
+      result = result.filter((p) => p.stock === 0);
+    }
+
+    if (stockFilter === "Bajo stock") {
+      result = result.filter((p) => p.stock > 0 && p.stock <= 5);
+    }
+
+    if (offerFilter === "Con oferta") {
+      result = result.filter((p) => !!p.discount);
+    }
+
+    if (offerFilter === "Sin oferta") {
+      result = result.filter((p) => !p.discount);
+    }
 
     switch (sortBy) {
       case "Nombre A-Z":
-        r.sort((a, b) => a.name.localeCompare(b.name));
+        result.sort((a, b) => a.name.localeCompare(b.name));
         break;
       case "Mayor stock":
-        r.sort((a, b) => b.stock - a.stock);
+        result.sort((a, b) => b.stock - a.stock);
         break;
       case "Menor stock":
-        r.sort((a, b) => a.stock - b.stock);
+        result.sort((a, b) => a.stock - b.stock);
         break;
       case "Mayor descuento":
-        r.sort((a, b) => (b.discount || 0) - (a.discount || 0));
+        result.sort((a, b) => (b.discount || 0) - (a.discount || 0));
         break;
       case "Precio mayor":
-        r.sort((a, b) => b.price - a.price);
+        result.sort((a, b) => b.price - a.price);
         break;
       case "Precio menor":
-        r.sort((a, b) => a.price - b.price);
+        result.sort((a, b) => a.price - b.price);
         break;
       default:
-        r.sort((a, b) => b.id - a.id);
+        result.sort((a, b) => b.id - a.id);
     }
 
-    return r;
+    return result;
   }, [products, search, category, stockFilter, offerFilter, sortBy]);
 
   const metrics = useMemo(
@@ -227,7 +249,7 @@ export default function Productos() {
             0,
           );
 
-          const category = String(
+          const productCategory = String(
             getValue(row, ["category", "categoria", "rubro"]) ?? "General",
           );
 
@@ -249,7 +271,7 @@ export default function Productos() {
             sku,
             price,
             stock,
-            category,
+            category: productCategory,
             discount,
             hasImage,
             image: image ? String(image) : undefined,
@@ -487,10 +509,7 @@ export default function Productos() {
 
       {view === "table" && filteredProducts.length > 0 && (
         <div className="mt-3">
-          <ProductTable
-            products={filteredProducts}
-            onDelete={handleDelete}
-          />
+          <ProductTable products={filteredProducts} onDelete={handleDelete} />
         </div>
       )}
 
