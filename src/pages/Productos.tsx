@@ -76,6 +76,7 @@ export default function Productos() {
   const [sortBy, setSortBy] = useState<SortOption>("Recientes");
   const [view, setView] = useState<ViewMode>("cards");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [showOnlyNoImage, setShowOnlyNoImage] = useState(false);
 
   const menuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -136,6 +137,10 @@ export default function Productos() {
       result = result.filter((p) => !p.discount);
     }
 
+    if (showOnlyNoImage) {
+      result = result.filter((p) => !p.hasImage);
+    }
+
     switch (sortBy) {
       case "Nombre A-Z":
         result.sort((a, b) => a.name.localeCompare(b.name));
@@ -160,7 +165,7 @@ export default function Productos() {
     }
 
     return result;
-  }, [products, search, category, stockFilter, offerFilter, sortBy]);
+  }, [products, search, category, stockFilter, offerFilter, sortBy, showOnlyNoImage]);
 
   const metrics = useMemo(
     () => ({
@@ -185,7 +190,8 @@ export default function Productos() {
     search.trim() ||
     category !== "Todas" ||
     stockFilter !== "Todos" ||
-    offerFilter !== "Todos"
+    offerFilter !== "Todos" ||
+    showOnlyNoImage
   );
 
   function handleDelete(id: number) {
@@ -197,6 +203,7 @@ export default function Productos() {
     setCategory("Todas");
     setStockFilter("Todos");
     setOfferFilter("Todos");
+    setShowOnlyNoImage(false);
   }
 
   function handleImportClick() {
@@ -289,6 +296,79 @@ export default function Productos() {
     reader.readAsArrayBuffer(file);
   }
 
+  function handleAddProduct() {
+    const name = window.prompt("Nombre del producto:");
+    if (!name) return;
+
+    const sku = window.prompt("SKU:", `SKU-${Date.now()}`) || `SKU-${Date.now()}`;
+    const price = Number(window.prompt("Precio:", "0") || 0);
+    const stock = Number(window.prompt("Stock:", "0") || 0);
+    const category = window.prompt("Categoría:", "General") || "General";
+
+    const newProduct: Product = {
+      id: Date.now(),
+      name,
+      sku,
+      price,
+      stock,
+      category,
+      hasImage: false,
+    };
+
+    setProducts((prev) => [newProduct, ...prev]);
+  }
+
+  function handleExportInventory() {
+    const rows = products.map((p) => ({
+      id: p.id,
+      name: p.name,
+      sku: p.sku,
+      price: p.price,
+      stock: p.stock,
+      category: p.category,
+      discount: p.discount ?? "",
+      hasImage: p.hasImage ? "sí" : "no",
+      image: p.image ?? "",
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Productos");
+    XLSX.writeFile(workbook, "inventario-movi.xlsx");
+    setMenuOpen(false);
+  }
+
+  function handleViewWithoutImage() {
+    setShowOnlyNoImage((prev) => !prev);
+    setMenuOpen(false);
+  }
+
+  function handleGenerateReport() {
+    const report = [
+      "REPORTE MOVI",
+      "",
+      `Total productos: ${products.length}`,
+      `Con stock: ${products.filter((p) => p.stock > 0).length}`,
+      `Sin stock: ${products.filter((p) => p.stock === 0).length}`,
+      `Sin imagen: ${products.filter((p) => !p.hasImage).length}`,
+      `Con oferta: ${products.filter((p) => !!p.discount).length}`,
+    ].join("\n");
+
+    const blob = new Blob([report], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "reporte-movi.txt";
+    a.click();
+    URL.revokeObjectURL(url);
+    setMenuOpen(false);
+  }
+
+  function handleSettings() {
+    window.alert("Aquí puedes conectar una pantalla de configuración más adelante.");
+    setMenuOpen(false);
+  }
+
   return (
     <div className="mx-auto max-w-[1440px] px-6 py-5">
       <input
@@ -324,7 +404,10 @@ export default function Productos() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <button className="inline-flex h-11 items-center gap-2 rounded-xl bg-violet-600 px-5 text-[14px] font-bold text-white shadow-sm shadow-violet-300/40 transition hover:bg-violet-700">
+            <button
+              onClick={handleAddProduct}
+              className="inline-flex h-11 items-center gap-2 rounded-xl bg-violet-600 px-5 text-[14px] font-bold text-white shadow-sm shadow-violet-300/40 transition hover:bg-violet-700"
+            >
               <Plus className="h-4 w-4" />
               Agregar producto
             </button>
@@ -352,13 +435,18 @@ export default function Productos() {
               {menuOpen && (
                 <div className="absolute right-0 top-12 z-50 w-56 overflow-hidden rounded-2xl border border-slate-100 bg-white py-1 shadow-2xl shadow-slate-200/40 ring-1 ring-black/[0.04]">
                   {[
-                    { icon: Upload, label: "Exportar inventario" },
-                    { icon: ImageIcon, label: "Ver sin imagen" },
-                    { icon: FileText, label: "Generar reporte" },
-                    { icon: Settings, label: "Configuración" },
-                  ].map(({ icon: Icon, label }) => (
+                    { icon: Upload, label: "Exportar inventario", action: handleExportInventory },
+                    {
+                      icon: ImageIcon,
+                      label: showOnlyNoImage ? "Ver todos" : "Ver sin imagen",
+                      action: handleViewWithoutImage,
+                    },
+                    { icon: FileText, label: "Generar reporte", action: handleGenerateReport },
+                    { icon: Settings, label: "Configuración", action: handleSettings },
+                  ].map(({ icon: Icon, label, action }) => (
                     <button
                       key={label}
+                      onClick={action}
                       className="flex w-full items-center gap-2.5 px-4 py-2.5 text-[13px] text-slate-700 transition-colors hover:bg-slate-50"
                     >
                       <Icon className="h-3.5 w-3.5 text-slate-400" />
@@ -369,7 +457,10 @@ export default function Productos() {
                   <div className="my-1 border-t border-slate-100" />
 
                   <button
-                    onClick={() => setProducts([])}
+                    onClick={() => {
+                      setProducts([]);
+                      setMenuOpen(false);
+                    }}
                     className="flex w-full items-center gap-2.5 px-4 py-2.5 text-[13px] text-slate-400 transition-colors hover:bg-rose-50 hover:text-rose-600"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
