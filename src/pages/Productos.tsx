@@ -1,3 +1,4 @@
+
 import { useMemo, useState, useRef, useEffect } from "react";
 import * as XLSX from "xlsx";
 import {
@@ -77,6 +78,7 @@ export default function Productos() {
   const [view, setView] = useState<ViewMode>("cards");
   const [menuOpen, setMenuOpen] = useState(false);
   const [showOnlyNoImage, setShowOnlyNoImage] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
 
   const menuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -207,6 +209,7 @@ export default function Productos() {
   }
 
   function handleImportClick() {
+    if (isImporting) return;
     fileInputRef.current?.click();
   }
 
@@ -214,83 +217,119 @@ export default function Productos() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    setIsImporting(true);
+
     const reader = new FileReader();
 
     reader.onload = (evt) => {
-      try {
-        const data = evt.target?.result;
-        if (!data) return;
+      setTimeout(() => {
+        try {
+          const data = evt.target?.result;
+          if (!data) {
+            throw new Error("No se pudo leer el archivo.");
+          }
 
-        const workbook = XLSX.read(data, { type: "array" });
-        const sheetName = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[sheetName];
-        const rows = XLSX.utils.sheet_to_json<Record<string, any>>(sheet);
+          const workbook = XLSX.read(data, {
+            type: "array",
+            cellDates: true,
+            dense: true,
+          });
 
-        if (!rows.length) {
-          window.alert("El archivo no contiene filas válidas para importar.");
-          return;
+          const sheetName = workbook.SheetNames[0];
+          const sheet = workbook.Sheets[sheetName];
+
+          if (!sheet) {
+            throw new Error("La hoja del archivo no es válida.");
+          }
+
+          const rows = XLSX.utils.sheet_to_json<Record<string, any>>(sheet, {
+            defval: "",
+            raw: false,
+          });
+
+          if (!rows.length) {
+            window.alert("El archivo no contiene filas válidas para importar.");
+            return;
+          }
+
+          const importedProducts: Product[] = rows
+            .map((row, index) => {
+              const id = toNumber(
+                getValue(row, ["id", "codigo", "iddelarticulo"]),
+                Date.now() + index,
+              );
+
+              const name = String(
+                getValue(row, ["name", "nombre", "producto", "titulo", "nombreproducto"]) ?? "",
+              ).trim();
+
+              const sku = String(
+                getValue(row, ["sku", "codigosku", "codigo", "referencia", "iddelarticulo"]) ?? `SKU-${id}`,
+              ).trim();
+
+              const price = toNumber(
+                getValue(row, ["price", "precio", "preciooferta1", "normal", "costo"]),
+                0,
+              );
+
+              const stock = toNumber(
+                getValue(row, ["stock", "inventario", "cantidad", "unidades", "peso"]),
+                0,
+              );
+
+              const productCategory = String(
+                getValue(row, ["category", "categoria", "rubro"]) ?? "General",
+              ).trim();
+
+              const discountRaw = getValue(row, ["discount", "descuento", "oferta", "preciooferta2"]);
+              const discount =
+                discountRaw !== undefined && discountRaw !== null && discountRaw !== ""
+                  ? toNumber(discountRaw, 0)
+                  : undefined;
+
+              const image = getValue(row, ["image", "imagen", "foto", "urlimagen"]);
+              const hasImage =
+                image !== undefined && image !== null && String(image).trim() !== ""
+                  ? true
+                  : toBoolean(getValue(row, ["hasImage", "has_image", "conimagen"]));
+
+              if (!name) return null;
+
+              return {
+                id,
+                name,
+                sku,
+                price,
+                stock,
+                category: productCategory || "General",
+                discount,
+                hasImage,
+                image: image ? String(image).trim() : undefined,
+              } as Product;
+            })
+            .filter(Boolean) as Product[];
+
+          if (!importedProducts.length) {
+            window.alert("No se encontraron productos válidos en el archivo.");
+            return;
+          }
+
+          setProducts(importedProducts);
+          window.alert(`Se importaron ${importedProducts.length} productos correctamente.`);
+        } catch (error) {
+          console.error(error);
+          window.alert("No se pudo importar el archivo. Usa un Excel simple o CSV con columnas válidas.");
+        } finally {
+          setIsImporting(false);
+          e.target.value = "";
         }
+      }, 50);
+    };
 
-        const importedProducts: Product[] = rows.map((row, index) => {
-          const id = toNumber(
-            getValue(row, ["id", "codigo", "codigointerno"]),
-            Date.now() + index,
-          );
-
-          const name = String(
-            getValue(row, ["name", "nombre", "producto", "titulo"]) ?? `Producto ${index + 1}`,
-          );
-
-          const sku = String(
-            getValue(row, ["sku", "codigosku", "codigo", "referencia"]) ?? `SKU-${id}`,
-          );
-
-          const price = toNumber(
-            getValue(row, ["price", "precio", "valor"]),
-            0,
-          );
-
-          const stock = toNumber(
-            getValue(row, ["stock", "inventario", "cantidad", "unidades"]),
-            0,
-          );
-
-          const productCategory = String(
-            getValue(row, ["category", "categoria", "rubro"]) ?? "General",
-          );
-
-          const discountRaw = getValue(row, ["discount", "descuento", "oferta"]);
-          const discount =
-            discountRaw !== undefined && discountRaw !== null && discountRaw !== ""
-              ? toNumber(discountRaw, 0)
-              : undefined;
-
-          const image = getValue(row, ["image", "imagen", "foto", "urlimagen"]);
-          const hasImage =
-            image !== undefined && image !== null && String(image).trim() !== ""
-              ? true
-              : toBoolean(getValue(row, ["hasImage", "has_image", "conimagen"]));
-
-          return {
-            id,
-            name,
-            sku,
-            price,
-            stock,
-            category: productCategory,
-            discount,
-            hasImage,
-            image: image ? String(image) : undefined,
-          } as Product;
-        });
-
-        setProducts(importedProducts);
-      } catch (error) {
-        console.error(error);
-        window.alert("No se pudo importar el archivo. Revisa el formato del Excel o CSV.");
-      } finally {
-        e.target.value = "";
-      }
+    reader.onerror = () => {
+      setIsImporting(false);
+      e.target.value = "";
+      window.alert("Error al leer el archivo.");
     };
 
     reader.readAsArrayBuffer(file);
@@ -393,7 +432,7 @@ export default function Productos() {
                 </h1>
 
                 <span className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-violet-700">
-                  ✨ Inventario inteligente
+                  ✨ INVENTARIO INTELIGENTE
                 </span>
               </div>
 
@@ -414,10 +453,11 @@ export default function Productos() {
 
             <button
               onClick={handleImportClick}
-              className="inline-flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-5 text-[14px] font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+              disabled={isImporting}
+              className="inline-flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-5 text-[14px] font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <Upload className="h-4 w-4" />
-              Importar Excel
+              {isImporting ? "Importando..." : "Importar Excel"}
             </button>
 
             <div className="relative" ref={menuRef}>
