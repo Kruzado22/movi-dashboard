@@ -446,10 +446,6 @@ export default function Productos() {
       result = result.filter((product) => !product.discount);
     }
 
-    if (showOnlyNoImage) {
-      result = result.filter((product) => !product.hasImage);
-    }
-
     switch (sortBy) {
       case "Nombre A-Z":
         result.sort((a, b) => a.name.localeCompare(b.name));
@@ -471,6 +467,10 @@ export default function Productos() {
         break;
       default:
         result.sort((a, b) => b.id - a.id);
+    }
+
+    if (showOnlyNoImage) {
+      result.sort((a, b) => Number(a.hasImage) - Number(b.hasImage));
     }
 
     return result;
@@ -971,7 +971,7 @@ export default function Productos() {
                     { icon: RefreshCw, label: "Importar desde Mocha", action: handleImportFromMocha },
                     {
                       icon: ImageIcon,
-                      label: showOnlyNoImage ? "Ver todos" : "Ver sin imagen",
+                      label: showOnlyNoImage ? "Orden normal" : "Sin imagen primero",
                       action: handleViewWithoutImage,
                     },
                     { icon: FileText, label: "Generar reporte", action: handleGenerateReport },
@@ -1092,6 +1092,12 @@ export default function Productos() {
             Mostrando <span className="font-bold text-slate-700">{filteredProducts.length}</span> de{" "}
             <span className="font-bold text-slate-700">{products.length}</span> productos
           </p>
+
+          {showOnlyNoImage && (
+            <p className="rounded-full bg-sky-50 px-3 py-1 text-[12px] font-semibold text-sky-700 ring-1 ring-sky-200">
+              Productos sin imagen al inicio, sin ocultar el inventario
+            </p>
+          )}
 
           <p className="text-[13px] font-semibold text-slate-600">
             Valor inventario: <span className="text-slate-950">{formatCLP(metrics.inventoryValue)}</span>
