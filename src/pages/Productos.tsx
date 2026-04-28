@@ -496,6 +496,11 @@ export default function Productos() {
     [products],
   );
 
+  const missingImageProducts = useMemo(
+    () => filteredProducts.filter((product) => !product.hasImage),
+    [filteredProducts],
+  );
+
   const hasActiveFilters = !!(
     search.trim() ||
     category !== "Todas" ||
@@ -971,7 +976,7 @@ export default function Productos() {
                     { icon: RefreshCw, label: "Importar desde Mocha", action: handleImportFromMocha },
                     {
                       icon: ImageIcon,
-                      label: showOnlyNoImage ? "Orden normal" : "Sin imagen primero",
+                      label: showOnlyNoImage ? "Ocultar listado sin imagen" : "Listado sin imagen",
                       action: handleViewWithoutImage,
                     },
                     { icon: FileText, label: "Generar reporte", action: handleGenerateReport },
@@ -1095,7 +1100,7 @@ export default function Productos() {
 
           {showOnlyNoImage && (
             <p className="rounded-full bg-sky-50 px-3 py-1 text-[12px] font-semibold text-sky-700 ring-1 ring-sky-200">
-              Productos sin imagen al inicio, sin ocultar el inventario
+              Listado sin imagen activo, inventario completo abajo
             </p>
           )}
 
@@ -1114,6 +1119,91 @@ export default function Productos() {
           )}
         </div>
       </div>
+
+      {showOnlyNoImage && missingImageProducts.length > 0 && (
+        <section className="mt-5 overflow-hidden rounded-[22px] border border-sky-200 bg-white shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-sky-100 bg-sky-50/70 px-4 py-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
+                <ImageIcon className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-[15px] font-black text-slate-900">Productos sin imagen</h2>
+                <p className="text-[12px] text-slate-500">
+                  {missingImageProducts.length} pendiente{missingImageProducts.length === 1 ? "" : "s"}.
+                  Usa el buscador para ubicar por nombre o SKU.
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setShowOnlyNoImage(false)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-sky-200 bg-white px-3 py-1.5 text-[12px] font-semibold text-sky-700 transition-colors hover:bg-sky-50"
+            >
+              <X className="h-3.5 w-3.5" />
+              Cerrar listado
+            </button>
+          </div>
+
+          <div className="max-h-[420px] overflow-y-auto divide-y divide-slate-100">
+            {missingImageProducts.map((product) => (
+              <div
+                key={product.id}
+                className="grid grid-cols-1 gap-3 px-4 py-3 transition-colors hover:bg-slate-50 md:grid-cols-[minmax(0,1fr)_110px_95px_132px] md:items-center"
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-400">
+                    <ImageIcon className="h-5 w-5" />
+                  </div>
+
+                  <div className="min-w-0">
+                    <p className="truncate text-[13px] font-bold text-slate-900">{product.name}</p>
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                      <span className="rounded-md bg-slate-100 px-2 py-0.5 font-mono text-slate-600">
+                        SKU {product.sku}
+                      </span>
+                      <span>#{product.id}</span>
+                      <span>{product.category}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 md:block">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400 md:block">
+                    Stock
+                  </span>
+                  <span
+                    className={`text-[13px] font-black tabular-nums ${
+                      product.stock === 0
+                        ? "text-rose-600"
+                        : product.stock <= 5
+                          ? "text-amber-600"
+                          : "text-slate-800"
+                    }`}
+                  >
+                    {product.stock} uds
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 md:block">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400 md:block">
+                    Precio
+                  </span>
+                  <span className="text-[13px] font-black text-slate-900">{formatCLP(product.price)}</span>
+                </div>
+
+                <button
+                  onClick={() => openEditProduct(product)}
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 text-[12.5px] font-bold text-white shadow-sm shadow-violet-300/30 transition-colors hover:bg-violet-700"
+                >
+                  <FilePenLine className="h-4 w-4" />
+                  Completar foto
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {filteredProducts.length === 0 && (
         <div className="mt-6 flex flex-col items-center rounded-2xl border border-dashed border-slate-300 bg-white py-14 text-center">
