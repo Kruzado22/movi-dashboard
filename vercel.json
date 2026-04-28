@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/mocha-api/:path*",
+      "destination": "https://uiyacnls65gg4.mocha.app/api/:path*"
+    }
+  ]
+}

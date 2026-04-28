@@ -8,9 +8,10 @@ type Props = {
   product: Product;
   onDelete: (id: number) => void;
   onEdit?: (product: Product) => void;
+  onDuplicate?: (product: Product) => void;
 };
 
-export default function ProductCard({ product, onDelete, onEdit }: Props) {
+export default function ProductCard({ product, onDelete, onEdit, onDuplicate }: Props) {
   const [imgError, setImgError] = useState(false);
   const showImage = product.hasImage && product.image && !imgError;
 
@@ -21,7 +22,7 @@ export default function ProductCard({ product, onDelete, onEdit }: Props) {
         {showImage ? (
           <img
             src={product.image}
-            alt=""
+            alt={product.name}
             className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.04]"
             onError={() => setImgError(true)}
           />
@@ -104,6 +105,7 @@ export default function ProductCard({ product, onDelete, onEdit }: Props) {
           </button>
           <button
             title="Duplicar"
+            onClick={() => onDuplicate?.(product)}
             className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-2.5 py-[7px] text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-50"
           >
             <Copy className="h-3.5 w-3.5" />

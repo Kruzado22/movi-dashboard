@@ -14,6 +14,7 @@ type Props = {
   products: Product[];
   onDelete: (id: number) => void;
   onEdit?: (product: Product) => void;
+  onDuplicate?: (product: Product) => void;
 };
 
 function TableImageCell({ product }: { product: Product }) {
@@ -24,7 +25,7 @@ function TableImageCell({ product }: { product: Product }) {
       {showImg ? (
         <img
           src={product.image}
-          alt=""
+          alt={product.name}
           className="h-full w-full object-cover"
           onError={() => setImgError(true)}
         />
@@ -37,7 +38,7 @@ function TableImageCell({ product }: { product: Product }) {
   );
 }
 
-export default function ProductTable({ products, onDelete, onEdit }: Props) {
+export default function ProductTable({ products, onDelete, onEdit, onDuplicate }: Props) {
   const [selected, setSelected] = useState<Set<number>>(new Set());
 
   function toggleSelect(id: number) {
@@ -59,7 +60,7 @@ export default function ProductTable({ products, onDelete, onEdit }: Props) {
   const allSelected = products.length > 0 && selected.size === products.length;
 
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
       <table className="min-w-full text-left">
         <thead>
           <tr className="border-b border-slate-100 bg-slate-50/80">
@@ -194,6 +195,7 @@ export default function ProductTable({ products, onDelete, onEdit }: Props) {
                   </button>
                   <button
                     title="Duplicar"
+                    onClick={() => onDuplicate?.(product)}
                     className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100"
                   >
                     <Copy className="h-3.5 w-3.5" />
