@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Pencil, Copy, Trash2, Image as ImageIcon } from "lucide-react";
 import type { Product } from "@/types";
 import { formatCLP } from "@/data/products";
+import { formatKg, getVolumetricBadgeClass, getVolumetricInfo } from "@/lib/volumetric";
 import StatusBadge from "./StatusBadge";
 
 type Props = {
@@ -14,6 +15,7 @@ type Props = {
 export default function ProductCard({ product, onDelete, onEdit, onDuplicate }: Props) {
   const [imgError, setImgError] = useState(false);
   const showImage = product.hasImage && product.image && !imgError;
+  const volumetric = getVolumetricInfo(product);
 
   return (
     <div className="group flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition duration-200 hover:-translate-y-px hover:border-violet-200 hover:shadow-[0_4px_24px_-4px_rgba(109,40,217,0.14)]">
@@ -93,6 +95,24 @@ export default function ProductCard({ product, onDelete, onEdit, onDuplicate }: 
           <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
             {product.category}
           </span>
+        </div>
+
+        <div className="mb-3 rounded-lg border border-slate-100 bg-slate-50/70 px-3 py-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400">
+              Volumétrico
+            </span>
+            <span
+              className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${getVolumetricBadgeClass(
+                volumetric.status,
+              )}`}
+            >
+              {volumetric.statusLabel}
+            </span>
+          </div>
+          <p className="mt-1 text-[12px] font-black text-slate-900">
+            Cobrable: {formatKg(volumetric.billableWeightKg)}
+          </p>
         </div>
 
         <div className="flex items-center gap-1.5">

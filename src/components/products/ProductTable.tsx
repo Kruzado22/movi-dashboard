@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import type { Product } from "@/types";
 import { formatCLP } from "@/data/products";
+import { formatKg, getVolumetricBadgeClass, getVolumetricInfo } from "@/lib/volumetric";
 import StatusBadge from "./StatusBadge";
 
 type Props = {
@@ -34,6 +35,25 @@ function TableImageCell({ product }: { product: Product }) {
           <ImageIcon className="h-4 w-4 text-slate-300" />
         </div>
       )}
+    </div>
+  );
+}
+
+function VolumetricTableCell({ product }: { product: Product }) {
+  const volumetric = getVolumetricInfo(product);
+
+  return (
+    <div className="min-w-[118px]">
+      <span
+        className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold ${getVolumetricBadgeClass(
+          volumetric.status,
+        )}`}
+      >
+        {volumetric.statusLabel}
+      </span>
+      <p className="mt-1 text-[11px] font-semibold text-slate-500">
+        {formatKg(volumetric.billableWeightKg)}
+      </p>
     </div>
   );
 }
@@ -83,7 +103,7 @@ export default function ProductTable({ products, onDelete, onEdit, onDuplicate }
                 )}
               </div>
             </th>
-            {["Producto", "SKU", "Categoría", "Precio", "Stock", "Oferta", "Estado", ""].map(
+            {["Producto", "SKU", "Categoría", "Precio", "Stock", "Vol.", "Oferta", "Estado", ""].map(
               (h) => (
                 <th
                   key={h}
@@ -168,6 +188,9 @@ export default function ProductTable({ products, onDelete, onEdit, onDuplicate }
                 >
                   {product.stock}
                 </span>
+              </td>
+              <td className="px-3 py-3">
+                <VolumetricTableCell product={product} />
               </td>
               <td className="px-3 py-3">
                 {product.discount ? (

@@ -29,6 +29,12 @@ import MetricCard from "@/components/products/MetricCard";
 import ProductCard from "@/components/products/ProductCard";
 import ProductTable from "@/components/products/ProductTable";
 import FilterBar from "@/components/products/FilterBar";
+import {
+  VOLUMETRIC_FACTOR,
+  formatKg,
+  getVolumetricBadgeClass,
+  getVolumetricInfo,
+} from "@/lib/volumetric";
 
 const STORAGE_KEY = "movi.products.v1";
 const MOCHA_ORIGIN = "https://uiyacnls65gg4.mocha.app";
@@ -378,6 +384,7 @@ export default function Productos() {
   const [view, setView] = useState<ViewMode>("cards");
   const [menuOpen, setMenuOpen] = useState(false);
   const [showOnlyNoImage, setShowOnlyNoImage] = useState(false);
+  const [showVolumetricPanel, setShowVolumetricPanel] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -501,12 +508,37 @@ export default function Productos() {
     [filteredProducts],
   );
 
+  const volumetricRows = useMemo(
+    () =>
+      filteredProducts.map((product) => ({
+        product,
+        info: getVolumetricInfo(product),
+      })),
+    [filteredProducts],
+  );
+
+  const volumetricMetrics = useMemo(() => {
+    const rows = products.map((product) => getVolumetricInfo(product));
+
+    return {
+      needsData: rows.filter((info) => info.status === "complete-data").length,
+      high: rows.filter((info) => info.status === "volumetric-high").length,
+      billableTotal: rows.reduce((total, info) => total + (info.billableWeightKg ?? 0), 0),
+    };
+  }, [products]);
+
+  const draftVolumetric = useMemo(
+    () => getVolumetricInfo({ measurements: draft.measurements, weight: draft.weight }),
+    [draft.measurements, draft.weight],
+  );
+
   const hasActiveFilters = !!(
     search.trim() ||
     category !== "Todas" ||
     stockFilter !== "Todos" ||
     offerFilter !== "Todos" ||
-    showOnlyNoImage
+    showOnlyNoImage ||
+    showVolumetricPanel
   );
 
   function clearFilters() {
@@ -515,6 +547,7 @@ export default function Productos() {
     setStockFilter("Todos");
     setOfferFilter("Todos");
     setShowOnlyNoImage(false);
+    setShowVolumetricPanel(false);
   }
 
   function openAddProduct() {
@@ -775,6 +808,10 @@ export default function Productos() {
       descuento: product.discount ?? "",
       medidas: product.measurements ?? "",
       peso: product.weight ?? "",
+      peso_real_kg: getVolumetricInfo(product).realWeightKg ?? "",
+      peso_volumetrico_kg: getVolumetricInfo(product).volumetricWeightKg ?? "",
+      peso_cobrable_kg: getVolumetricInfo(product).billableWeightKg ?? "",
+      estado_volumetrico: getVolumetricInfo(product).statusLabel,
       valor_inventario: product.price * product.stock,
       tiene_imagen: product.hasImage ? "sí" : "no",
       imagen: product.image ?? "",
@@ -791,6 +828,12 @@ export default function Productos() {
     const lowStockProducts = products.filter((product) => product.stock > 0 && product.stock <= 5);
     const outOfStockProducts = products.filter((product) => product.stock === 0);
     const withoutImageProducts = products.filter((product) => !product.hasImage);
+    const volumetricProducts = products.map((product) => ({
+      product,
+      info: getVolumetricInfo(product),
+    }));
+    const volumetricPending = volumetricProducts.filter(({ info }) => info.status === "complete-data");
+    const volumetricHigh = volumetricProducts.filter(({ info }) => info.status === "volumetric-high");
 
     const report = [
       "REPORTE MOVI",
@@ -801,6 +844,8 @@ export default function Productos() {
       `Sin stock: ${metrics.outOfStock}`,
       `Stock bajo: ${lowStockProducts.length}`,
       `Sin imagen: ${withoutImageProducts.length}`,
+      `Volumetría pendiente: ${volumetricPending.length}`,
+      `Volumétrico alto: ${volumetricHigh.length}`,
       `Con oferta: ${alerts.offers}`,
       "",
       "Productos sin stock:",
@@ -811,6 +856,17 @@ export default function Productos() {
       "",
       "Productos sin imagen:",
       ...withoutImageProducts.map((product) => `- ${product.sku} | ${product.name}`),
+      "",
+      "Productos con volumétrico alto:",
+      ...volumetricHigh.map(
+        ({ product, info }) =>
+          `- ${product.sku} | ${product.name} | cobrable ${formatKg(info.billableWeightKg)} | vol ${formatKg(
+            info.volumetricWeightKg,
+          )} | real ${formatKg(info.realWeightKg)}`,
+      ),
+      "",
+      "Productos con volumetría pendiente:",
+      ...volumetricPending.map(({ product, info }) => `- ${product.sku} | ${product.name} | falta ${info.missing.join(" y ")}`),
     ].join("\n");
 
     downloadBlob(new Blob([report], { type: "text/plain;charset=utf-8" }), "reporte-movi.txt");
@@ -819,6 +875,11 @@ export default function Productos() {
 
   function handleViewWithoutImage() {
     setShowOnlyNoImage((current) => !current);
+    setMenuOpen(false);
+  }
+
+  function handleViewVolumetricPanel() {
+    setShowVolumetricPanel((current) => !current);
     setMenuOpen(false);
   }
 
@@ -979,6 +1040,11 @@ export default function Productos() {
                       label: showOnlyNoImage ? "Ocultar listado sin imagen" : "Listado sin imagen",
                       action: handleViewWithoutImage,
                     },
+                    {
+                      icon: Scale,
+                      label: showVolumetricPanel ? "Ocultar estado volumétrico" : "Estado volumétrico",
+                      action: handleViewVolumetricPanel,
+                    },
                     { icon: FileText, label: "Generar reporte", action: handleGenerateReport },
                     { icon: RotateCcw, label: "Restaurar demo", action: handleRestoreDemo },
                   ].map(({ icon: Icon, label, action }) => (
@@ -1064,6 +1130,18 @@ export default function Productos() {
           </button>
         )}
 
+        {(volumetricMetrics.needsData > 0 || volumetricMetrics.high > 0) && (
+          <button
+            onClick={() => setShowVolumetricPanel(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-3 py-1.5 text-[12px] font-semibold text-violet-700 transition-colors hover:bg-violet-100"
+          >
+            <Scale className="h-3.5 w-3.5" />
+            {volumetricMetrics.needsData > 0
+              ? `${volumetricMetrics.needsData} sin datos volumétricos`
+              : `${volumetricMetrics.high} con volumétrico alto`}
+          </button>
+        )}
+
         {alerts.offers > 0 && (
           <button
             onClick={() => setOfferFilter("Con oferta")}
@@ -1104,6 +1182,12 @@ export default function Productos() {
             </p>
           )}
 
+          {showVolumetricPanel && (
+            <p className="rounded-full bg-violet-50 px-3 py-1 text-[12px] font-semibold text-violet-700 ring-1 ring-violet-200">
+              Estado volumétrico activo, factor {VOLUMETRIC_FACTOR}
+            </p>
+          )}
+
           <p className="text-[13px] font-semibold text-slate-600">
             Valor inventario: <span className="text-slate-950">{formatCLP(metrics.inventoryValue)}</span>
           </p>
@@ -1119,6 +1203,107 @@ export default function Productos() {
           )}
         </div>
       </div>
+
+      {showVolumetricPanel && volumetricRows.length > 0 && (
+        <section className="mt-5 overflow-hidden rounded-[22px] border border-violet-200 bg-white shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-violet-100 bg-violet-50/70 px-4 py-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-100 text-violet-700">
+                <Scale className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-[15px] font-black text-slate-900">Estado volumétrico</h2>
+                <p className="text-[12px] text-slate-500">
+                  Cálculo con medidas en cm: largo x ancho x alto / {VOLUMETRIC_FACTOR}.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full bg-white px-3 py-1 text-[12px] font-bold text-slate-700 ring-1 ring-violet-100">
+                {volumetricMetrics.needsData} pendientes
+              </span>
+              <span className="rounded-full bg-white px-3 py-1 text-[12px] font-bold text-amber-700 ring-1 ring-amber-100">
+                {volumetricMetrics.high} alto volumen
+              </span>
+              <span className="rounded-full bg-white px-3 py-1 text-[12px] font-bold text-violet-700 ring-1 ring-violet-100">
+                Total cobrable {formatKg(volumetricMetrics.billableTotal)}
+              </span>
+              <button
+                onClick={() => setShowVolumetricPanel(false)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-violet-200 bg-white px-3 py-1.5 text-[12px] font-semibold text-violet-700 transition-colors hover:bg-violet-50"
+              >
+                <X className="h-3.5 w-3.5" />
+                Cerrar
+              </button>
+            </div>
+          </div>
+
+          <div className="max-h-[460px] overflow-y-auto divide-y divide-slate-100">
+            {volumetricRows.map(({ product, info }) => (
+              <div
+                key={product.id}
+                className="grid grid-cols-1 gap-3 px-4 py-3 transition-colors hover:bg-slate-50 lg:grid-cols-[minmax(0,1fr)_132px_118px_118px_132px_138px] lg:items-center"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-[13px] font-bold text-slate-900">{product.name}</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                    <span className="rounded-md bg-slate-100 px-2 py-0.5 font-mono text-slate-600">
+                      SKU {product.sku}
+                    </span>
+                    <span>#{product.id}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 lg:block">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400 lg:block">
+                    Medidas
+                  </span>
+                  <span className="text-[12px] font-bold text-slate-700">
+                    {product.measurements || "Sin medidas"}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 lg:block">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400 lg:block">
+                    Peso real
+                  </span>
+                  <span className="text-[12px] font-black text-slate-900">{formatKg(info.realWeightKg)}</span>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 lg:block">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400 lg:block">
+                    Volumétrico
+                  </span>
+                  <span className="text-[12px] font-black text-slate-900">{formatKg(info.volumetricWeightKg)}</span>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 lg:block">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400 lg:block">
+                    Cobrable
+                  </span>
+                  <span
+                    className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold ${getVolumetricBadgeClass(
+                      info.status,
+                    )}`}
+                  >
+                    {info.statusLabel}
+                  </span>
+                  <p className="mt-1 text-[12px] font-black text-slate-900">{formatKg(info.billableWeightKg)}</p>
+                </div>
+
+                <button
+                  onClick={() => openEditProduct(product)}
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 text-[12.5px] font-bold text-white shadow-sm shadow-violet-300/30 transition-colors hover:bg-violet-700"
+                >
+                  <FilePenLine className="h-4 w-4" />
+                  Editar datos
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {showOnlyNoImage && missingImageProducts.length > 0 && (
         <section className="mt-5 overflow-hidden rounded-[22px] border border-sky-200 bg-white shadow-sm">
@@ -1433,6 +1618,47 @@ export default function Productos() {
                     />
                   </label>
                 </div>
+
+                <section className="rounded-3xl border border-violet-100 bg-white/80 p-5 shadow-sm">
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-[18px] font-black text-slate-900">
+                      <Scale className="h-5 w-5 text-violet-600" />
+                      Estado volumétrico
+                    </div>
+                    <span
+                      className={`rounded-full border px-3 py-1 text-[12px] font-black ${getVolumetricBadgeClass(
+                        draftVolumetric.status,
+                      )}`}
+                    >
+                      {draftVolumetric.statusLabel}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3 text-[13px] md:grid-cols-3">
+                    <div className="rounded-2xl bg-slate-50 px-4 py-3">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Peso real</p>
+                      <p className="mt-1 text-[18px] font-black text-slate-900">
+                        {formatKg(draftVolumetric.realWeightKg)}
+                      </p>
+                    </div>
+                    <div className="rounded-2xl bg-slate-50 px-4 py-3">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Volumétrico</p>
+                      <p className="mt-1 text-[18px] font-black text-slate-900">
+                        {formatKg(draftVolumetric.volumetricWeightKg)}
+                      </p>
+                    </div>
+                    <div className="rounded-2xl bg-slate-50 px-4 py-3">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Peso cobrable</p>
+                      <p className="mt-1 text-[18px] font-black text-slate-900">
+                        {formatKg(draftVolumetric.billableWeightKg)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <p className="mt-3 text-[12px] font-semibold text-slate-500">
+                    {draftVolumetric.statusDescription} Factor usado: {VOLUMETRIC_FACTOR}.
+                  </p>
+                </section>
               </div>
 
               <div className="sticky bottom-0 mt-8 grid grid-cols-1 gap-5 border-t border-white/70 bg-[#f3f0f8]/95 py-5 backdrop-blur md:grid-cols-2">
