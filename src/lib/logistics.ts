@@ -194,7 +194,7 @@ function findRateRow(weight: number) {
 }
 
 export function getLogisticsCostInfo(
-  product: Pick<Product, "price" | "cost" | "measurements" | "weight" | "logisticsTier">,
+  product: Pick<Product, "price" | "cost" | "measurements" | "weight" | "logisticsTier"> & { description?: string },
 ): LogisticsCostInfo {
   const tier = normalizeLogisticsTier(product.logisticsTier);
   const priceBand = getPriceBand(product.price);

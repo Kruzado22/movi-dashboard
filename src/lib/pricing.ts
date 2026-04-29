@@ -69,6 +69,7 @@ export function roundRecommendedPrice(value: number) {
 
 export function getProfitInfo(
   product: Pick<Product, "price" | "cost" | "measurements" | "weight" | "logisticsTier" | "pricingProfile"> & {
+    description?: string;
     commissionRate?: unknown;
     cofinancingRate?: unknown;
   },

@@ -34,6 +34,8 @@ import ProductTable from "@/components/products/ProductTable";
 import FilterBar from "@/components/products/FilterBar";
 import {
   VOLUMETRIC_FACTOR,
+  extractMeasurementsFromText,
+  extractWeightFromText,
   formatKg,
   getVolumetricBadgeClass,
   getVolumetricInfo,
@@ -290,12 +292,15 @@ function normalizeProduct(input: ProductInput, index = 0): Product {
   const image = String(input.image ?? "").trim();
   const name = String(input.name ?? `Producto ${index + 1}`).trim();
   const sku = String(input.sku ?? `SKU-${id}`).trim();
+  const description = String(input.description ?? "").trim();
   const category = String(input.category ?? "General").trim() || "General";
   const cost = toNumber(input.cost, 0);
   const normalPrice = toNumber(input.normalPrice, 0);
   const offerPrice1 = toNumber(input.offerPrice1, 0);
   const offerPrice2 = toNumber(input.offerPrice2, 0);
   const pricingProfile = normalizePricingProfile(input.pricingProfile);
+  const measurements = String(input.measurements ?? "").trim() || extractMeasurementsFromText(description);
+  const weight = String(input.weight ?? "").trim() || extractWeightFromText(description);
   const offerPrice = [offerPrice1, offerPrice2].filter((value) => value > 0).sort((a, b) => a - b)[0] ?? 0;
   const price = Math.trunc(
     clampNumber(toNumber(input.price, 0) || offerPrice || normalPrice || cost, 0),
@@ -309,7 +314,7 @@ function normalizeProduct(input: ProductInput, index = 0): Product {
     id,
     name,
     sku: sku || `SKU-${id}`,
-    description: String(input.description ?? "").trim(),
+    description,
     price,
     cost: cost > 0 ? Math.trunc(cost) : undefined,
     normalPrice: normalPrice > 0 ? Math.trunc(normalPrice) : undefined,
@@ -321,8 +326,8 @@ function normalizeProduct(input: ProductInput, index = 0): Product {
     status: getProductStatus(stock),
     category,
     image,
-    measurements: String(input.measurements ?? "").trim(),
-    weight: String(input.weight ?? "").trim(),
+    measurements,
+    weight,
     logisticsTier: normalizeLogisticsTier(input.logisticsTier),
     pricingProfile,
     commissionRate: normalizeRate(input.commissionRate, DEFAULT_COMMISSION_RATE),
@@ -705,8 +710,8 @@ export default function Productos() {
   }, [products]);
 
   const draftVolumetric = useMemo(
-    () => getVolumetricInfo({ measurements: draft.measurements, weight: draft.weight }),
-    [draft.measurements, draft.weight],
+    () => getVolumetricInfo({ measurements: draft.measurements, weight: draft.weight, description: draft.description }),
+    [draft.description, draft.measurements, draft.weight],
   );
 
   const draftLogistics = useMemo(
@@ -714,11 +719,12 @@ export default function Productos() {
       getLogisticsCostInfo({
         price: toNumber(draft.offerPrice2 || draft.offerPrice1 || draft.normalPrice || draft.price, 0),
         cost: toNumber(draft.cost, 0),
+        description: draft.description,
         measurements: draft.measurements,
         weight: draft.weight,
         logisticsTier: draft.logisticsTier,
       }),
-    [draft.cost, draft.logisticsTier, draft.measurements, draft.normalPrice, draft.offerPrice1, draft.offerPrice2, draft.price, draft.weight],
+    [draft.cost, draft.description, draft.logisticsTier, draft.measurements, draft.normalPrice, draft.offerPrice1, draft.offerPrice2, draft.price, draft.weight],
   );
 
   const draftProfit = useMemo(
@@ -726,6 +732,7 @@ export default function Productos() {
       getProfitInfo({
         price: toNumber(draft.offerPrice2 || draft.offerPrice1 || draft.normalPrice || draft.price, 0),
         cost: toNumber(draft.cost, 0),
+        description: draft.description,
         measurements: draft.measurements,
         weight: draft.weight,
         logisticsTier: draft.logisticsTier,
@@ -737,6 +744,7 @@ export default function Productos() {
       draft.cofinancingRate,
       draft.commissionRate,
       draft.cost,
+      draft.description,
       draft.logisticsTier,
       draft.measurements,
       draft.normalPrice,
@@ -790,6 +798,22 @@ export default function Productos() {
 
   function updateDraft<K extends keyof ProductDraft>(field: K, value: ProductDraft[K]) {
     setDraft((current) => ({ ...current, [field]: value }));
+  }
+
+  function handleFillVolumetricFromDescription() {
+    const measurements = extractMeasurementsFromText(draft.description);
+    const weight = extractWeightFromText(draft.description);
+
+    if (!measurements && !weight) {
+      window.alert("No encontre medidas o peso en la descripcion.");
+      return;
+    }
+
+    setDraft((current) => ({
+      ...current,
+      measurements: current.measurements || measurements,
+      weight: current.weight || weight,
+    }));
   }
 
   function handleSaveProduct(event: FormEvent<HTMLFormElement>) {
@@ -2343,13 +2367,15 @@ export default function Productos() {
                       <Scale className="h-5 w-5 text-violet-600" />
                       Estado volumétrico
                     </div>
-                    <span
+                    <button
+                      type="button"
+                      onClick={handleFillVolumetricFromDescription}
                       className={`rounded-full border px-3 py-1 text-[12px] font-black ${getVolumetricBadgeClass(
                         draftVolumetric.status,
                       )}`}
                     >
                       {draftVolumetric.statusLabel}
-                    </span>
+                    </button>
                   </div>
 
                   <div className="grid grid-cols-1 gap-3 text-[13px] md:grid-cols-3">

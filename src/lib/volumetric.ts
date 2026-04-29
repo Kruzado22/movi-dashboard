@@ -33,6 +33,35 @@ function parseNumberList(value?: string) {
   return (value.match(/\d+(?:[.,]\d+)?/g) ?? []).map(parseDecimal).filter((number) => number > 0);
 }
 
+function cleanDimensionValue(value: string) {
+  return value
+    .replace(/\b(?:cm|cms|centimetros?)\b/gi, "")
+    .replace(/[Xx*\u00d7]/g, "x")
+    .replace(/\s+/g, "")
+    .trim();
+}
+
+function cleanWeightValue(value: string, unit?: string) {
+  const normalizedUnit = (unit ?? "kg").toLowerCase();
+  const suffix = /\b(?:g|gr|grs|gramos?)\b/.test(normalizedUnit) ? "gr" : "kg";
+  return `${value.replace(".", ",")} ${suffix}`;
+}
+
+export function extractMeasurementsFromText(value?: string) {
+  if (!value) return "";
+
+  const labeledMatch = value.match(
+    /\b(?:medidas?|dimensiones?|dimension|tamano|tama\u00f1o)\b(?:\s+del\s+producto)?\s*[:\-]?\s*((?:\d+(?:[.,]\d+)?\s*(?:cm|cms|centimetros?)?\s*[xX*\u00d7]\s*){2}\d+(?:[.,]\d+)?\s*(?:cm|cms|centimetros?)?)/i,
+  );
+  const fallbackMatch = value.match(
+    /\b(\d+(?:[.,]\d+)?)\s*(?:cm|cms|centimetros?)?\s*[xX*\u00d7]\s*(\d+(?:[.,]\d+)?)\s*(?:cm|cms|centimetros?)?\s*[xX*\u00d7]\s*(\d+(?:[.,]\d+)?)\s*(?:cm|cms|centimetros?)?\b/i,
+  );
+  const raw = labeledMatch?.[1] ?? fallbackMatch?.[0] ?? "";
+  const cleaned = cleanDimensionValue(raw);
+
+  return parseMeasurements(cleaned) ? cleaned : "";
+}
+
 export function parseMeasurements(value?: string) {
   const [lengthCm, widthCm, heightCm] = parseNumberList(value);
 
@@ -41,6 +70,22 @@ export function parseMeasurements(value?: string) {
   }
 
   return { lengthCm, widthCm, heightCm };
+}
+
+export function extractWeightFromText(value?: string) {
+  if (!value) return "";
+
+  const labeledMatch = value.match(
+    /\b(?:peso|peso\s+real|peso\s+neto|peso\s+producto)\b(?:\s+del\s+producto)?\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*(kg|kgs|kilo|kilos|g|gr|grs|gramos?)?\b/i,
+  );
+  const unitMatch = value.match(
+    /\b(\d+(?:[.,]\d+)?)\s*(kg|kgs|kilo|kilos|g|gr|grs|gramos?)\b/i,
+  );
+  const number = labeledMatch?.[1] ?? unitMatch?.[1] ?? "";
+  const unit = labeledMatch?.[2] ?? unitMatch?.[2];
+  const cleaned = number ? cleanWeightValue(number, unit) : "";
+
+  return parseWeightKg(cleaned) ? cleaned : "";
 }
 
 export function parseWeightKg(value?: string) {
@@ -66,9 +111,13 @@ export function formatKg(value?: number | null) {
   }).format(value)} kg`;
 }
 
-export function getVolumetricInfo(product: Pick<Product, "measurements" | "weight">): VolumetricInfo {
-  const dimensions = parseMeasurements(product.measurements);
-  const realWeightKg = parseWeightKg(product.weight);
+export function getVolumetricInfo(
+  product: Pick<Product, "measurements" | "weight"> & { description?: string },
+): VolumetricInfo {
+  const measurements = product.measurements || extractMeasurementsFromText(product.description);
+  const weight = product.weight || extractWeightFromText(product.description);
+  const dimensions = parseMeasurements(measurements);
+  const realWeightKg = parseWeightKg(weight);
   const missing = [
     !dimensions ? "medidas" : "",
     !realWeightKg ? "peso" : "",
