@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Pencil, Copy, Trash2, Image as ImageIcon } from "lucide-react";
 import type { Product } from "@/types";
 import { formatCLP } from "@/data/products";
+import { getLogisticsCostInfo } from "@/lib/logistics";
 import { formatKg, getVolumetricBadgeClass, getVolumetricInfo } from "@/lib/volumetric";
 import StatusBadge from "./StatusBadge";
 
@@ -16,6 +17,7 @@ export default function ProductCard({ product, onDelete, onEdit, onDuplicate }: 
   const [imgError, setImgError] = useState(false);
   const showImage = product.hasImage && product.image && !imgError;
   const volumetric = getVolumetricInfo(product);
+  const logistics = getLogisticsCostInfo(product);
 
   return (
     <div className="group flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition duration-200 hover:-translate-y-px hover:border-violet-200 hover:shadow-[0_4px_24px_-4px_rgba(109,40,217,0.14)]">
@@ -112,6 +114,9 @@ export default function ProductCard({ product, onDelete, onEdit, onDuplicate }: 
           </div>
           <p className="mt-1 text-[12px] font-black text-slate-900">
             Cobrable: {formatKg(volumetric.billableWeightKg)}
+          </p>
+          <p className="mt-1 text-[12px] font-black text-emerald-700">
+            Logística: {logistics.cost !== undefined ? formatCLP(logistics.cost) : "Sin calcular"}
           </p>
         </div>
 

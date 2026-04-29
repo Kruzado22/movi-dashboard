@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import type { Product } from "@/types";
 import { formatCLP } from "@/data/products";
+import { getLogisticsCostInfo } from "@/lib/logistics";
 import { formatKg, getVolumetricBadgeClass, getVolumetricInfo } from "@/lib/volumetric";
 import StatusBadge from "./StatusBadge";
 
@@ -58,6 +59,21 @@ function VolumetricTableCell({ product }: { product: Product }) {
   );
 }
 
+function LogisticsTableCell({ product }: { product: Product }) {
+  const logistics = getLogisticsCostInfo(product);
+
+  return (
+    <div className="min-w-[108px]">
+      <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+        {logistics.tier}
+      </span>
+      <p className="mt-1 text-[11px] font-bold text-slate-700">
+        {logistics.cost !== undefined ? formatCLP(logistics.cost) : "Sin calcular"}
+      </p>
+    </div>
+  );
+}
+
 export default function ProductTable({ products, onDelete, onEdit, onDuplicate }: Props) {
   const [selected, setSelected] = useState<Set<number>>(new Set());
 
@@ -103,7 +119,7 @@ export default function ProductTable({ products, onDelete, onEdit, onDuplicate }
                 )}
               </div>
             </th>
-            {["Producto", "SKU", "Categoría", "Precio", "Stock", "Vol.", "Oferta", "Estado", ""].map(
+            {["Producto", "SKU", "Categoría", "Precio", "Stock", "Vol.", "Log.", "Oferta", "Estado", ""].map(
               (h) => (
                 <th
                   key={h}
@@ -191,6 +207,9 @@ export default function ProductTable({ products, onDelete, onEdit, onDuplicate }
               </td>
               <td className="px-3 py-3">
                 <VolumetricTableCell product={product} />
+              </td>
+              <td className="px-3 py-3">
+                <LogisticsTableCell product={product} />
               </td>
               <td className="px-3 py-3">
                 {product.discount ? (

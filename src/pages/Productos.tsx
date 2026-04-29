@@ -22,8 +22,9 @@ import {
   Scale,
   Tag,
   FilePenLine,
+  Truck,
 } from "lucide-react";
-import type { Product, ProductStatus, SortOption, ViewMode } from "@/types";
+import type { LogisticsTier, Product, ProductStatus, SortOption, ViewMode } from "@/types";
 import { PRODUCTS_MOCK, formatCLP } from "@/data/products";
 import MetricCard from "@/components/products/MetricCard";
 import ProductCard from "@/components/products/ProductCard";
@@ -35,6 +36,12 @@ import {
   getVolumetricBadgeClass,
   getVolumetricInfo,
 } from "@/lib/volumetric";
+import {
+  LOGISTICS_PRICE_LIMIT,
+  LOGISTICS_TIERS,
+  getLogisticsCostInfo,
+  normalizeLogisticsTier,
+} from "@/lib/logistics";
 
 const STORAGE_KEY = "movi.products.v1";
 const MOCHA_ORIGIN = "https://uiyacnls65gg4.mocha.app";
@@ -54,6 +61,7 @@ type ProductDraft = {
   image: string;
   measurements: string;
   weight: string;
+  logisticsTier: LogisticsTier;
 };
 
 type ProductInput = {
@@ -74,6 +82,7 @@ type ProductInput = {
   image?: unknown;
   measurements?: unknown;
   weight?: unknown;
+  logisticsTier?: unknown;
 };
 
 type MochaProduct = {
@@ -181,6 +190,7 @@ function mapMochaProduct(product: MochaProduct, index = 0): Product {
     hasImage: image.length > 0,
     measurements: product.measurements ?? "",
     weight: product.weight ?? "",
+    logisticsTier: "5/5",
   });
 }
 
@@ -287,6 +297,7 @@ function normalizeProduct(input: ProductInput, index = 0): Product {
     image,
     measurements: String(input.measurements ?? "").trim(),
     weight: String(input.weight ?? "").trim(),
+    logisticsTier: normalizeLogisticsTier(input.logisticsTier),
   };
 }
 
@@ -343,6 +354,7 @@ function createEmptyDraft(nextId: number): ProductDraft {
     image: "",
     measurements: "",
     weight: "",
+    logisticsTier: "5/5",
   };
 }
 
@@ -362,6 +374,7 @@ function createDraftFromProduct(product: Product): ProductDraft {
     image: product.image ?? "",
     measurements: product.measurements ?? "",
     weight: product.weight ?? "",
+    logisticsTier: normalizeLogisticsTier(product.logisticsTier),
   };
 }
 
@@ -385,6 +398,7 @@ export default function Productos() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [showOnlyNoImage, setShowOnlyNoImage] = useState(false);
   const [showVolumetricPanel, setShowVolumetricPanel] = useState(false);
+  const [showLogisticsPanel, setShowLogisticsPanel] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -527,9 +541,43 @@ export default function Productos() {
     };
   }, [products]);
 
+  const logisticsRows = useMemo(
+    () =>
+      filteredProducts.map((product) => ({
+        product,
+        info: getLogisticsCostInfo(product),
+      })),
+    [filteredProducts],
+  );
+
+  const logisticsMetrics = useMemo(() => {
+    const rows = products.map((product) => ({
+      product,
+      info: getLogisticsCostInfo(product),
+    }));
+
+    return {
+      pending: rows.filter(({ info }) => info.cost === undefined).length,
+      totalCost: rows.reduce((total, { product, info }) => total + (info.cost ?? 0) * product.stock, 0),
+      totalMargin: rows.reduce((total, { product, info }) => total + (info.margin ?? 0) * product.stock, 0),
+    };
+  }, [products]);
+
   const draftVolumetric = useMemo(
     () => getVolumetricInfo({ measurements: draft.measurements, weight: draft.weight }),
     [draft.measurements, draft.weight],
+  );
+
+  const draftLogistics = useMemo(
+    () =>
+      getLogisticsCostInfo({
+        price: toNumber(draft.offerPrice2 || draft.offerPrice1 || draft.normalPrice || draft.price, 0),
+        cost: toNumber(draft.cost, 0),
+        measurements: draft.measurements,
+        weight: draft.weight,
+        logisticsTier: draft.logisticsTier,
+      }),
+    [draft.cost, draft.logisticsTier, draft.measurements, draft.normalPrice, draft.offerPrice1, draft.offerPrice2, draft.price, draft.weight],
   );
 
   const hasActiveFilters = !!(
@@ -538,7 +586,8 @@ export default function Productos() {
     stockFilter !== "Todos" ||
     offerFilter !== "Todos" ||
     showOnlyNoImage ||
-    showVolumetricPanel
+    showVolumetricPanel ||
+    showLogisticsPanel
   );
 
   function clearFilters() {
@@ -548,6 +597,7 @@ export default function Productos() {
     setOfferFilter("Todos");
     setShowOnlyNoImage(false);
     setShowVolumetricPanel(false);
+    setShowLogisticsPanel(false);
   }
 
   function openAddProduct() {
@@ -568,7 +618,7 @@ export default function Productos() {
     setEditingProduct(null);
   }
 
-  function updateDraft(field: keyof ProductDraft, value: string) {
+  function updateDraft<K extends keyof ProductDraft>(field: K, value: ProductDraft[K]) {
     setDraft((current) => ({ ...current, [field]: value }));
   }
 
@@ -608,6 +658,7 @@ export default function Productos() {
       hasImage: image.length > 0,
       measurements: draft.measurements,
       weight: draft.weight,
+      logisticsTier: draft.logisticsTier,
     });
 
     setProducts((current) =>
@@ -744,6 +795,15 @@ export default function Productos() {
               image,
               measurements: getValue(row, ["measurements", "medidas", "dimension", "dimensiones", "tamano", "tamaño"]),
               weight: getValue(row, ["weight", "peso", "kg"]),
+              logisticsTier: getValue(row, [
+                "cofinanciamiento",
+                "cofinanciamientologistico",
+                "cofinanciamiento logistico",
+                "nivel",
+                "nivel logistico",
+                "talla",
+                "rating",
+              ]),
             }, index);
           })
           .filter(Boolean) as Product[];
@@ -812,6 +872,11 @@ export default function Productos() {
       peso_volumetrico_kg: getVolumetricInfo(product).volumetricWeightKg ?? "",
       peso_cobrable_kg: getVolumetricInfo(product).billableWeightKg ?? "",
       estado_volumetrico: getVolumetricInfo(product).statusLabel,
+      cofinanciamiento_logistico: getLogisticsCostInfo(product).tier,
+      tramo_logistico: getLogisticsCostInfo(product).weightRange ?? "",
+      costo_logistico: getLogisticsCostInfo(product).cost ?? "",
+      costo_total_estimado: getLogisticsCostInfo(product).totalCost ?? "",
+      margen_estimado: getLogisticsCostInfo(product).margin ?? "",
       valor_inventario: product.price * product.stock,
       tiene_imagen: product.hasImage ? "sí" : "no",
       imagen: product.image ?? "",
@@ -834,6 +899,11 @@ export default function Productos() {
     }));
     const volumetricPending = volumetricProducts.filter(({ info }) => info.status === "complete-data");
     const volumetricHigh = volumetricProducts.filter(({ info }) => info.status === "volumetric-high");
+    const logisticsProducts = products.map((product) => ({
+      product,
+      info: getLogisticsCostInfo(product),
+    }));
+    const logisticsPending = logisticsProducts.filter(({ info }) => info.cost === undefined);
 
     const report = [
       "REPORTE MOVI",
@@ -846,6 +916,9 @@ export default function Productos() {
       `Sin imagen: ${withoutImageProducts.length}`,
       `Volumetría pendiente: ${volumetricPending.length}`,
       `Volumétrico alto: ${volumetricHigh.length}`,
+      `Logistica pendiente: ${logisticsPending.length}`,
+      `Costo logistico total: ${formatCLP(logisticsMetrics.totalCost)}`,
+      `Margen estimado total: ${formatCLP(logisticsMetrics.totalMargin)}`,
       `Con oferta: ${alerts.offers}`,
       "",
       "Productos sin stock:",
@@ -867,6 +940,14 @@ export default function Productos() {
       "",
       "Productos con volumetría pendiente:",
       ...volumetricPending.map(({ product, info }) => `- ${product.sku} | ${product.name} | falta ${info.missing.join(" y ")}`),
+      "",
+      "Costos logisticos estimados:",
+      ...logisticsProducts.map(
+        ({ product, info }) =>
+          `- ${product.sku} | ${product.name} | ${info.tier} | ${info.weightRange ?? "sin tramo"} | logistica ${
+            info.cost !== undefined ? formatCLP(info.cost) : "sin calcular"
+          } | margen ${info.margin !== undefined ? formatCLP(info.margin) : "sin calcular"}`,
+      ),
     ].join("\n");
 
     downloadBlob(new Blob([report], { type: "text/plain;charset=utf-8" }), "reporte-movi.txt");
@@ -880,6 +961,11 @@ export default function Productos() {
 
   function handleViewVolumetricPanel() {
     setShowVolumetricPanel((current) => !current);
+    setMenuOpen(false);
+  }
+
+  function handleViewLogisticsPanel() {
+    setShowLogisticsPanel((current) => !current);
     setMenuOpen(false);
   }
 
@@ -1045,6 +1131,11 @@ export default function Productos() {
                       label: showVolumetricPanel ? "Ocultar estado volumétrico" : "Estado volumétrico",
                       action: handleViewVolumetricPanel,
                     },
+                    {
+                      icon: Truck,
+                      label: showLogisticsPanel ? "Ocultar costo logístico" : "Costo logístico",
+                      action: handleViewLogisticsPanel,
+                    },
                     { icon: FileText, label: "Generar reporte", action: handleGenerateReport },
                     { icon: RotateCcw, label: "Restaurar demo", action: handleRestoreDemo },
                   ].map(({ icon: Icon, label, action }) => (
@@ -1142,6 +1233,14 @@ export default function Productos() {
           </button>
         )}
 
+        <button
+          onClick={() => setShowLogisticsPanel(true)}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-[12px] font-semibold text-emerald-700 transition-colors hover:bg-emerald-100"
+        >
+          <Truck className="h-3.5 w-3.5" />
+          Logística estimada: {formatCLP(logisticsMetrics.totalCost)}
+        </button>
+
         {alerts.offers > 0 && (
           <button
             onClick={() => setOfferFilter("Con oferta")}
@@ -1185,6 +1284,12 @@ export default function Productos() {
           {showVolumetricPanel && (
             <p className="rounded-full bg-violet-50 px-3 py-1 text-[12px] font-semibold text-violet-700 ring-1 ring-violet-200">
               Estado volumétrico activo, factor {VOLUMETRIC_FACTOR}
+            </p>
+          )}
+
+          {showLogisticsPanel && (
+            <p className="rounded-full bg-emerald-50 px-3 py-1 text-[12px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
+              Costo logístico activo, corte {formatCLP(LOGISTICS_PRICE_LIMIT)}
             </p>
           )}
 
@@ -1298,6 +1403,123 @@ export default function Productos() {
                 >
                   <FilePenLine className="h-4 w-4" />
                   Editar datos
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {showLogisticsPanel && logisticsRows.length > 0 && (
+        <section className="mt-5 overflow-hidden rounded-[22px] border border-emerald-200 bg-white shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-emerald-100 bg-emerald-50/70 px-4 py-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700">
+                <Truck className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-[15px] font-black text-slate-900">Costo logístico</h2>
+                <p className="text-[12px] text-slate-500">
+                  Cruza precio, peso cobrable y cofinanciamiento 5/5, 4/5, 3/5 o 2/5.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full bg-white px-3 py-1 text-[12px] font-bold text-emerald-700 ring-1 ring-emerald-100">
+                Logística {formatCLP(logisticsMetrics.totalCost)}
+              </span>
+              <span
+                className={`rounded-full bg-white px-3 py-1 text-[12px] font-bold ring-1 ${
+                  logisticsMetrics.totalMargin >= 0
+                    ? "text-slate-700 ring-emerald-100"
+                    : "text-rose-700 ring-rose-100"
+                }`}
+              >
+                Margen {formatCLP(logisticsMetrics.totalMargin)}
+              </span>
+              {logisticsMetrics.pending > 0 && (
+                <span className="rounded-full bg-white px-3 py-1 text-[12px] font-bold text-amber-700 ring-1 ring-amber-100">
+                  {logisticsMetrics.pending} pendientes
+                </span>
+              )}
+              <button
+                onClick={() => setShowLogisticsPanel(false)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-[12px] font-semibold text-emerald-700 transition-colors hover:bg-emerald-50"
+              >
+                <X className="h-3.5 w-3.5" />
+                Cerrar
+              </button>
+            </div>
+          </div>
+
+          <div className="max-h-[460px] overflow-y-auto divide-y divide-slate-100">
+            {logisticsRows.map(({ product, info }) => (
+              <div
+                key={product.id}
+                className="grid grid-cols-1 gap-3 px-4 py-3 transition-colors hover:bg-slate-50 xl:grid-cols-[minmax(0,1fr)_102px_122px_116px_116px_118px_138px] xl:items-center"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-[13px] font-bold text-slate-900">{product.name}</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                    <span className="rounded-md bg-slate-100 px-2 py-0.5 font-mono text-slate-600">
+                      SKU {product.sku}
+                    </span>
+                    <span>Precio {formatCLP(product.price)}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 xl:block">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400 xl:block">
+                    Nivel
+                  </span>
+                  <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-black text-emerald-700 ring-1 ring-emerald-100">
+                    {info.tier}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 xl:block">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400 xl:block">
+                    Tramo
+                  </span>
+                  <span className="text-[12px] font-bold text-slate-700">{info.weightRange ?? "Sin datos"}</span>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 xl:block">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400 xl:block">
+                    Cobrable
+                  </span>
+                  <span className="text-[12px] font-black text-slate-900">{formatKg(info.billableWeightKg)}</span>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 xl:block">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400 xl:block">
+                    Logística
+                  </span>
+                  <span className="text-[12px] font-black text-slate-900">
+                    {info.cost !== undefined ? formatCLP(info.cost) : "Sin calcular"}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 xl:block">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400 xl:block">
+                    Margen
+                  </span>
+                  <span
+                    className={`text-[12px] font-black ${
+                      (info.margin ?? 0) < 0 ? "text-rose-600" : "text-slate-900"
+                    }`}
+                  >
+                    {info.margin !== undefined ? formatCLP(info.margin) : "Sin calcular"}
+                  </span>
+                </div>
+
+                <button
+                  onClick={() => openEditProduct(product)}
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 text-[12.5px] font-bold text-white shadow-sm shadow-emerald-300/30 transition-colors hover:bg-emerald-700"
+                >
+                  <FilePenLine className="h-4 w-4" />
+                  Editar nivel
                 </button>
               </div>
             ))}
@@ -1658,6 +1880,60 @@ export default function Productos() {
                   <p className="mt-3 text-[12px] font-semibold text-slate-500">
                     {draftVolumetric.statusDescription} Factor usado: {VOLUMETRIC_FACTOR}.
                   </p>
+                </section>
+
+                <section className="rounded-3xl border border-emerald-100 bg-white/80 p-5 shadow-sm">
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-[18px] font-black text-slate-900">
+                      <Truck className="h-5 w-5 text-emerald-600" />
+                      Costo logístico
+                    </div>
+                    <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[12px] font-black text-emerald-700">
+                      {draftLogistics.priceBandLabel}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                    {LOGISTICS_TIERS.map((tier) => (
+                      <button
+                        key={tier}
+                        type="button"
+                        onClick={() => updateDraft("logisticsTier", tier)}
+                        className={`h-11 rounded-2xl border text-[14px] font-black transition ${
+                          draft.logisticsTier === tier
+                            ? "border-emerald-500 bg-emerald-600 text-white shadow-sm shadow-emerald-300/40"
+                            : "border-emerald-100 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                        }`}
+                      >
+                        {tier}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-1 gap-3 text-[13px] md:grid-cols-3">
+                    <div className="rounded-2xl bg-slate-50 px-4 py-3">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Tramo</p>
+                      <p className="mt-1 text-[18px] font-black text-slate-900">
+                        {draftLogistics.weightRange ?? "Sin datos"}
+                      </p>
+                    </div>
+                    <div className="rounded-2xl bg-slate-50 px-4 py-3">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Logística</p>
+                      <p className="mt-1 text-[18px] font-black text-slate-900">
+                        {draftLogistics.cost !== undefined ? formatCLP(draftLogistics.cost) : "Sin calcular"}
+                      </p>
+                    </div>
+                    <div className="rounded-2xl bg-slate-50 px-4 py-3">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Margen</p>
+                      <p
+                        className={`mt-1 text-[18px] font-black ${
+                          (draftLogistics.margin ?? 0) < 0 ? "text-rose-600" : "text-slate-900"
+                        }`}
+                      >
+                        {draftLogistics.margin !== undefined ? formatCLP(draftLogistics.margin) : "Sin calcular"}
+                      </p>
+                    </div>
+                  </div>
                 </section>
               </div>
 
