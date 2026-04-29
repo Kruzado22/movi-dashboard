@@ -9,6 +9,7 @@ import {
 import type { Product } from "@/types";
 import { formatCLP } from "@/data/products";
 import { getLogisticsCostInfo } from "@/lib/logistics";
+import { formatPercent, getProfitBadgeClass, getProfitInfo } from "@/lib/pricing";
 import { formatKg, getVolumetricBadgeClass, getVolumetricInfo } from "@/lib/volumetric";
 import StatusBadge from "./StatusBadge";
 
@@ -74,6 +75,25 @@ function LogisticsTableCell({ product }: { product: Product }) {
   );
 }
 
+function ProfitTableCell({ product }: { product: Product }) {
+  const profit = getProfitInfo(product);
+
+  return (
+    <div className="min-w-[116px]">
+      <span
+        className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold ${getProfitBadgeClass(
+          profit.statusTone,
+        )}`}
+      >
+        {profit.statusLabel}
+      </span>
+      <p className="mt-1 text-[11px] font-bold text-slate-700">
+        {formatCLP(profit.grossProfit)} · {formatPercent(profit.grossMargin)}
+      </p>
+    </div>
+  );
+}
+
 export default function ProductTable({ products, onDelete, onEdit, onDuplicate }: Props) {
   const [selected, setSelected] = useState<Set<number>>(new Set());
 
@@ -119,7 +139,7 @@ export default function ProductTable({ products, onDelete, onEdit, onDuplicate }
                 )}
               </div>
             </th>
-            {["Producto", "SKU", "Categoría", "Precio", "Stock", "Vol.", "Log.", "Oferta", "Estado", ""].map(
+            {["Producto", "SKU", "Categoría", "Precio", "Stock", "Vol.", "Log.", "Margen", "Oferta", "Estado", ""].map(
               (h) => (
                 <th
                   key={h}
@@ -210,6 +230,9 @@ export default function ProductTable({ products, onDelete, onEdit, onDuplicate }
               </td>
               <td className="px-3 py-3">
                 <LogisticsTableCell product={product} />
+              </td>
+              <td className="px-3 py-3">
+                <ProfitTableCell product={product} />
               </td>
               <td className="px-3 py-3">
                 {product.discount ? (

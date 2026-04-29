@@ -3,6 +3,7 @@ import { Pencil, Copy, Trash2, Image as ImageIcon } from "lucide-react";
 import type { Product } from "@/types";
 import { formatCLP } from "@/data/products";
 import { getLogisticsCostInfo } from "@/lib/logistics";
+import { formatPercent, getProfitBadgeClass, getProfitInfo } from "@/lib/pricing";
 import { formatKg, getVolumetricBadgeClass, getVolumetricInfo } from "@/lib/volumetric";
 import StatusBadge from "./StatusBadge";
 
@@ -18,6 +19,7 @@ export default function ProductCard({ product, onDelete, onEdit, onDuplicate }: 
   const showImage = product.hasImage && product.image && !imgError;
   const volumetric = getVolumetricInfo(product);
   const logistics = getLogisticsCostInfo(product);
+  const profit = getProfitInfo(product);
 
   return (
     <div className="group flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition duration-200 hover:-translate-y-px hover:border-violet-200 hover:shadow-[0_4px_24px_-4px_rgba(109,40,217,0.14)]">
@@ -118,6 +120,16 @@ export default function ProductCard({ product, onDelete, onEdit, onDuplicate }: 
           <p className="mt-1 text-[12px] font-black text-emerald-700">
             Logística: {logistics.cost !== undefined ? formatCLP(logistics.cost) : "Sin calcular"}
           </p>
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <span
+              className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${getProfitBadgeClass(
+                profit.statusTone,
+              )}`}
+            >
+              {profit.statusLabel}
+            </span>
+            <span className="text-[11px] font-black text-slate-700">{formatPercent(profit.grossMargin)}</span>
+          </div>
         </div>
 
         <div className="flex items-center gap-1.5">

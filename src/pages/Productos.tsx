@@ -23,8 +23,10 @@ import {
   Tag,
   FilePenLine,
   Truck,
+  Calculator,
+  TrendingUp,
 } from "lucide-react";
-import type { LogisticsTier, Product, ProductStatus, SortOption, ViewMode } from "@/types";
+import type { LogisticsTier, PricingProfile, Product, ProductStatus, SortOption, ViewMode } from "@/types";
 import { PRODUCTS_MOCK, formatCLP } from "@/data/products";
 import MetricCard from "@/components/products/MetricCard";
 import ProductCard from "@/components/products/ProductCard";
@@ -42,6 +44,16 @@ import {
   getLogisticsCostInfo,
   normalizeLogisticsTier,
 } from "@/lib/logistics";
+import {
+  DEFAULT_COMMISSION_RATE,
+  DEFAULT_COFINANCING_RATE,
+  formatPercent,
+  getDefaultCofinancingRate,
+  getProfitBadgeClass,
+  getProfitInfo,
+  normalizePricingProfile,
+  normalizeRate,
+} from "@/lib/pricing";
 
 const STORAGE_KEY = "movi.products.v1";
 const MOCHA_ORIGIN = "https://uiyacnls65gg4.mocha.app";
@@ -62,6 +74,9 @@ type ProductDraft = {
   measurements: string;
   weight: string;
   logisticsTier: LogisticsTier;
+  pricingProfile: PricingProfile;
+  commissionRate: string;
+  cofinancingRate: string;
 };
 
 type ProductInput = {
@@ -83,6 +98,9 @@ type ProductInput = {
   measurements?: unknown;
   weight?: unknown;
   logisticsTier?: unknown;
+  pricingProfile?: unknown;
+  commissionRate?: unknown;
+  cofinancingRate?: unknown;
 };
 
 type MochaProduct = {
@@ -132,9 +150,13 @@ function toNumber(value: unknown, fallback = 0) {
     const hasDot = raw.includes(".");
 
     if (hasComma && hasDot) {
-      cleaned = raw.replace(/\./g, "").replace(/,/g, ".");
+      cleaned = /^\d{1,3}(,\d{3})+(\.\d+)?$/.test(raw)
+        ? raw.replace(/,/g, "")
+        : raw.replace(/\./g, "").replace(/,/g, ".");
     } else if (hasComma) {
-      cleaned = raw.replace(/,/g, ".");
+      cleaned = /^\d{1,3}(,\d{3})+$/.test(raw)
+        ? raw.replace(/,/g, "")
+        : raw.replace(/,/g, ".");
     } else if (/^\d{1,3}(\.\d{3})+$/.test(raw)) {
       cleaned = raw.replace(/\./g, "");
     } else {
@@ -191,6 +213,9 @@ function mapMochaProduct(product: MochaProduct, index = 0): Product {
     measurements: product.measurements ?? "",
     weight: product.weight ?? "",
     logisticsTier: "5/5",
+    pricingProfile: "4/5 estrellas",
+    commissionRate: DEFAULT_COMMISSION_RATE,
+    cofinancingRate: DEFAULT_COFINANCING_RATE,
   });
 }
 
@@ -270,6 +295,7 @@ function normalizeProduct(input: ProductInput, index = 0): Product {
   const normalPrice = toNumber(input.normalPrice, 0);
   const offerPrice1 = toNumber(input.offerPrice1, 0);
   const offerPrice2 = toNumber(input.offerPrice2, 0);
+  const pricingProfile = normalizePricingProfile(input.pricingProfile);
   const offerPrice = [offerPrice1, offerPrice2].filter((value) => value > 0).sort((a, b) => a - b)[0] ?? 0;
   const price = Math.trunc(
     clampNumber(toNumber(input.price, 0) || offerPrice || normalPrice || cost, 0),
@@ -298,6 +324,9 @@ function normalizeProduct(input: ProductInput, index = 0): Product {
     measurements: String(input.measurements ?? "").trim(),
     weight: String(input.weight ?? "").trim(),
     logisticsTier: normalizeLogisticsTier(input.logisticsTier),
+    pricingProfile,
+    commissionRate: normalizeRate(input.commissionRate, DEFAULT_COMMISSION_RATE),
+    cofinancingRate: normalizeRate(input.cofinancingRate, getDefaultCofinancingRate(pricingProfile)),
   };
 }
 
@@ -355,6 +384,9 @@ function createEmptyDraft(nextId: number): ProductDraft {
     measurements: "",
     weight: "",
     logisticsTier: "5/5",
+    pricingProfile: "4/5 estrellas",
+    commissionRate: String(DEFAULT_COMMISSION_RATE),
+    cofinancingRate: String(DEFAULT_COFINANCING_RATE),
   };
 }
 
@@ -375,6 +407,9 @@ function createDraftFromProduct(product: Product): ProductDraft {
     measurements: product.measurements ?? "",
     weight: product.weight ?? "",
     logisticsTier: normalizeLogisticsTier(product.logisticsTier),
+    pricingProfile: normalizePricingProfile(product.pricingProfile),
+    commissionRate: String(product.commissionRate ?? DEFAULT_COMMISSION_RATE),
+    cofinancingRate: String(product.cofinancingRate ?? getDefaultCofinancingRate(normalizePricingProfile(product.pricingProfile))),
   };
 }
 
@@ -385,6 +420,86 @@ function downloadBlob(blob: Blob, fileName: string) {
   link.download = fileName;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+function getPricingProfileFromSheet(sheetName: string) {
+  return sheetName.toLowerCase().includes("3 estrellas") ? "3 estrellas" : "4/5 estrellas";
+}
+
+function getCalculatorPriceValues(row: Record<string, unknown>) {
+  const { normalPrice, offer1, offer2, salePrice, computedDiscount } = getPriceValues(row);
+  const storePrice = toNumber(
+    getValue(row, [
+      "precio en tienda",
+      "precio en tienda pvp",
+      "pvp",
+      "precio tienda",
+      "precioentienda",
+      "precioventa",
+      "precio venta",
+    ]),
+    0,
+  );
+
+  return {
+    normalPrice,
+    offer1,
+    offer2,
+    salePrice: storePrice || salePrice,
+    computedDiscount,
+  };
+}
+
+function getCalculatorProducts(workbook: XLSX.WorkBook) {
+  const byKey = new Map<string, ProductInput>();
+
+  workbook.SheetNames.forEach((sheetName) => {
+    const sheet = workbook.Sheets[sheetName];
+    if (!sheet) return;
+
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+      defval: "",
+      raw: false,
+    });
+    const pricingProfile = getPricingProfileFromSheet(sheetName);
+    const cofinancingRate = getDefaultCofinancingRate(pricingProfile);
+
+    rows.forEach((row) => {
+      const rawName = getValue(row, ["name", "nombre", "nombre producto", "producto", "titulo", "nombreproducto"]);
+      const name = String(rawName ?? "").trim();
+      if (!name) return;
+
+      const key = normalizeKey(name);
+      if (byKey.has(key)) return;
+
+      const { normalPrice, offer1, offer2, salePrice, computedDiscount } = getCalculatorPriceValues(row);
+      const cost = toNumber(getValue(row, ["cost", "costo", "coste", "costo proveedor"]), 0);
+
+      const sku = String(getValue(row, ["sku", "codigo", "código", "referencia", "id"]) ?? "").trim();
+      const productInput: ProductInput = {
+        name,
+        sku,
+        price: salePrice,
+        cost,
+        normalPrice,
+        offerPrice1: offer1,
+        offerPrice2: offer2,
+        discount: computedDiscount,
+        pricingProfile,
+        commissionRate: DEFAULT_COMMISSION_RATE,
+        cofinancingRate,
+      };
+
+      byKey.set(key, productInput);
+
+      const skuKey = normalizeKey(sku);
+      if (skuKey && !byKey.has(skuKey)) {
+        byKey.set(skuKey, productInput);
+      }
+    });
+  });
+
+  return byKey;
 }
 
 export default function Productos() {
@@ -399,6 +514,7 @@ export default function Productos() {
   const [showOnlyNoImage, setShowOnlyNoImage] = useState(false);
   const [showVolumetricPanel, setShowVolumetricPanel] = useState(false);
   const [showLogisticsPanel, setShowLogisticsPanel] = useState(false);
+  const [showProfitPanel, setShowProfitPanel] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -406,6 +522,7 @@ export default function Productos() {
 
   const menuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pricingFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     document.title = "MOVI | Productos";
@@ -563,6 +680,30 @@ export default function Productos() {
     };
   }, [products]);
 
+  const profitRows = useMemo(
+    () =>
+      filteredProducts.map((product) => ({
+        product,
+        info: getProfitInfo(product),
+      })),
+    [filteredProducts],
+  );
+
+  const profitMetrics = useMemo(() => {
+    const rows = products.map((product) => ({
+      product,
+      info: getProfitInfo(product),
+    }));
+
+    return {
+      missing: rows.filter(({ info }) => info.statusTone === "missing").length,
+      low: rows.filter(({ info }) => info.statusTone === "warn").length,
+      negative: rows.filter(({ info }) => info.statusTone === "bad").length,
+      totalGrossProfit: rows.reduce((total, { product, info }) => total + info.grossProfit * product.stock, 0),
+      totalNetProfit: rows.reduce((total, { product, info }) => total + info.netProfit * product.stock, 0),
+    };
+  }, [products]);
+
   const draftVolumetric = useMemo(
     () => getVolumetricInfo({ measurements: draft.measurements, weight: draft.weight }),
     [draft.measurements, draft.weight],
@@ -580,6 +721,33 @@ export default function Productos() {
     [draft.cost, draft.logisticsTier, draft.measurements, draft.normalPrice, draft.offerPrice1, draft.offerPrice2, draft.price, draft.weight],
   );
 
+  const draftProfit = useMemo(
+    () =>
+      getProfitInfo({
+        price: toNumber(draft.offerPrice2 || draft.offerPrice1 || draft.normalPrice || draft.price, 0),
+        cost: toNumber(draft.cost, 0),
+        measurements: draft.measurements,
+        weight: draft.weight,
+        logisticsTier: draft.logisticsTier,
+        pricingProfile: draft.pricingProfile,
+        commissionRate: draft.commissionRate,
+        cofinancingRate: draft.cofinancingRate,
+      }),
+    [
+      draft.cofinancingRate,
+      draft.commissionRate,
+      draft.cost,
+      draft.logisticsTier,
+      draft.measurements,
+      draft.normalPrice,
+      draft.offerPrice1,
+      draft.offerPrice2,
+      draft.price,
+      draft.pricingProfile,
+      draft.weight,
+    ],
+  );
+
   const hasActiveFilters = !!(
     search.trim() ||
     category !== "Todas" ||
@@ -587,7 +755,8 @@ export default function Productos() {
     offerFilter !== "Todos" ||
     showOnlyNoImage ||
     showVolumetricPanel ||
-    showLogisticsPanel
+    showLogisticsPanel ||
+    showProfitPanel
   );
 
   function clearFilters() {
@@ -598,6 +767,7 @@ export default function Productos() {
     setShowOnlyNoImage(false);
     setShowVolumetricPanel(false);
     setShowLogisticsPanel(false);
+    setShowProfitPanel(false);
   }
 
   function openAddProduct() {
@@ -659,6 +829,9 @@ export default function Productos() {
       measurements: draft.measurements,
       weight: draft.weight,
       logisticsTier: draft.logisticsTier,
+      pricingProfile: draft.pricingProfile,
+      commissionRate: draft.commissionRate,
+      cofinancingRate: draft.cofinancingRate,
     });
 
     setProducts((current) =>
@@ -715,6 +888,12 @@ export default function Productos() {
   function handleImportClick() {
     if (isImporting) return;
     fileInputRef.current?.click();
+  }
+
+  function handlePricingImportClick() {
+    if (isImporting) return;
+    setMenuOpen(false);
+    pricingFileInputRef.current?.click();
   }
 
   function handleFileImport(event: React.ChangeEvent<HTMLInputElement>) {
@@ -804,6 +983,14 @@ export default function Productos() {
                 "talla",
                 "rating",
               ]),
+              pricingProfile: getValue(row, ["perfil", "perfil precio", "estrellas", "tipo precio"]),
+              commissionRate: getValue(row, ["comision", "comision%", "comision promedio", "commission"]),
+              cofinancingRate: getValue(row, [
+                "cofinanciamiento comercial",
+                "cofinanciamiento%",
+                "cofinanciamiento promedio",
+                "cofinancing",
+              ]),
             }, index);
           })
           .filter(Boolean) as Product[];
@@ -850,6 +1037,132 @@ export default function Productos() {
     reader.readAsArrayBuffer(file);
   }
 
+  function handlePricingFileImport(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsImporting(true);
+
+    const reader = new FileReader();
+
+    reader.onload = (readerEvent) => {
+      try {
+        const data = readerEvent.target?.result;
+        if (!data) throw new Error("No se pudo leer el archivo.");
+
+        const workbook = XLSX.read(data, {
+          type: "array",
+          cellDates: true,
+        });
+        const calculatorProducts = getCalculatorProducts(workbook);
+
+        if (!calculatorProducts.size) {
+          window.alert("No encontré productos válidos en la calculadora.");
+          return;
+        }
+
+        let matched = 0;
+        let added = 0;
+        const shouldAddMissing = window.confirm(
+          "¿Agregar también productos nuevos que estén en la calculadora pero no en MOVI?",
+        );
+
+        setProducts((current) => {
+          const usedIds = new Set(current.map((product) => product.id));
+          const usedKeys = new Set<string>();
+          const matchedInputs = new Set<ProductInput>();
+          const bySku = new Map(
+            current
+              .filter((product) => product.sku.trim())
+              .map((product) => [normalizeKey(product.sku), product]),
+          );
+
+          const updated = current.map((product) => {
+            const byNameKey = normalizeKey(product.name);
+            const bySkuKey = normalizeKey(product.sku);
+            const imported = calculatorProducts.get(byNameKey) ?? calculatorProducts.get(bySkuKey);
+
+            if (!imported) return product;
+
+            matched += 1;
+            matchedInputs.add(imported);
+            usedKeys.add(byNameKey);
+            usedKeys.add(bySkuKey);
+
+            const normalPrice = toNumber(imported.normalPrice, product.normalPrice ?? product.price);
+            const offerPrice1 = toNumber(imported.offerPrice1, product.offerPrice1 ?? 0);
+            const offerPrice2 = toNumber(imported.offerPrice2, product.offerPrice2 ?? 0);
+            const price = toNumber(imported.price, product.price);
+
+            return normalizeProduct({
+              ...product,
+              price: price || product.price,
+              cost: toNumber(imported.cost, product.cost ?? 0) || product.cost,
+              normalPrice: normalPrice || product.normalPrice,
+              offerPrice1: offerPrice1 || product.offerPrice1,
+              offerPrice2: offerPrice2 || product.offerPrice2,
+              discount: imported.discount || product.discount,
+              pricingProfile: imported.pricingProfile ?? product.pricingProfile,
+              commissionRate: imported.commissionRate ?? product.commissionRate,
+              cofinancingRate: imported.cofinancingRate ?? product.cofinancingRate,
+            });
+          });
+
+          if (!shouldAddMissing) return updated;
+
+          const additions: Product[] = [];
+          const addedInputs = new Set<ProductInput>();
+
+          calculatorProducts.forEach((imported, key) => {
+            if (matchedInputs.has(imported)) return;
+            if (addedInputs.has(imported)) return;
+
+            const sku = String(imported.sku ?? "").trim();
+            const skuKey = normalizeKey(sku);
+            const alreadyExists = usedKeys.has(key) || (skuKey && bySku.has(skuKey));
+
+            if (alreadyExists) return;
+
+            const id = getUniqueId(Date.now() + additions.length, usedIds);
+            added += 1;
+            addedInputs.add(imported);
+            additions.push(
+              normalizeProduct({
+                ...imported,
+                id,
+                sku: sku || `CALC-${id}`,
+                stock: 0,
+                category: "Calculadora",
+                image: "",
+                hasImage: false,
+              }),
+            );
+          });
+
+          return [...additions, ...updated];
+        });
+
+        window.alert(
+          `Calculadora importada. Actualizados: ${matched}. Productos nuevos: ${added}.`,
+        );
+      } catch (error) {
+        console.error(error);
+        window.alert("No se pudo importar la calculadora. Revisa que sea el Excel correcto.");
+      } finally {
+        setIsImporting(false);
+        event.target.value = "";
+      }
+    };
+
+    reader.onerror = () => {
+      setIsImporting(false);
+      event.target.value = "";
+      window.alert("Error al leer la calculadora.");
+    };
+
+    reader.readAsArrayBuffer(file);
+  }
+
   function handleExportInventory() {
     const source = filteredProducts.length ? filteredProducts : products;
     const rows = source.map((product) => ({
@@ -877,6 +1190,20 @@ export default function Productos() {
       costo_logistico: getLogisticsCostInfo(product).cost ?? "",
       costo_total_estimado: getLogisticsCostInfo(product).totalCost ?? "",
       margen_estimado: getLogisticsCostInfo(product).margin ?? "",
+      perfil_precio: getProfitInfo(product).profile,
+      comision_pct: getProfitInfo(product).commissionRate,
+      cofinanciamiento_pct: getProfitInfo(product).cofinancingRate,
+      comision_monto: getProfitInfo(product).commission,
+      cofinanciamiento_monto: getProfitInfo(product).cofinancing,
+      utilidad_bruta: getProfitInfo(product).grossProfit,
+      margen_bruto_pct: getProfitInfo(product).grossMargin,
+      utilidad_neta_estimada: getProfitInfo(product).netProfit,
+      margen_neto_pct: getProfitInfo(product).netMargin,
+      precio_minimo_recomendado: getProfitInfo(product).minimumPrice,
+      precio_margen_medio: getProfitInfo(product).mediumMarginPrice,
+      precio_cmr_envio_gratis: getProfitInfo(product).cmrOrFreeShippingPrice,
+      precio_temporada_baja: getProfitInfo(product).lowSeasonPrice,
+      precio_temporada_alta: getProfitInfo(product).highSeasonPrice,
       valor_inventario: product.price * product.stock,
       tiene_imagen: product.hasImage ? "sí" : "no",
       imagen: product.image ?? "",
@@ -904,6 +1231,11 @@ export default function Productos() {
       info: getLogisticsCostInfo(product),
     }));
     const logisticsPending = logisticsProducts.filter(({ info }) => info.cost === undefined);
+    const profitProducts = products.map((product) => ({
+      product,
+      info: getProfitInfo(product),
+    }));
+    const profitRisk = profitProducts.filter(({ info }) => ["bad", "warn", "missing"].includes(info.statusTone));
 
     const report = [
       "REPORTE MOVI",
@@ -919,6 +1251,9 @@ export default function Productos() {
       `Logistica pendiente: ${logisticsPending.length}`,
       `Costo logistico total: ${formatCLP(logisticsMetrics.totalCost)}`,
       `Margen estimado total: ${formatCLP(logisticsMetrics.totalMargin)}`,
+      `Utilidad bruta total: ${formatCLP(profitMetrics.totalGrossProfit)}`,
+      `Utilidad neta estimada total: ${formatCLP(profitMetrics.totalNetProfit)}`,
+      `Productos con riesgo de margen: ${profitRisk.length}`,
       `Con oferta: ${alerts.offers}`,
       "",
       "Productos sin stock:",
@@ -947,6 +1282,14 @@ export default function Productos() {
           `- ${product.sku} | ${product.name} | ${info.tier} | ${info.weightRange ?? "sin tramo"} | logistica ${
             info.cost !== undefined ? formatCLP(info.cost) : "sin calcular"
           } | margen ${info.margin !== undefined ? formatCLP(info.margin) : "sin calcular"}`,
+      ),
+      "",
+      "Rentabilidad:",
+      ...profitProducts.map(
+        ({ product, info }) =>
+          `- ${product.sku} | ${product.name} | ${info.statusLabel} | utilidad ${formatCLP(
+            info.grossProfit,
+          )} | margen ${formatPercent(info.grossMargin)} | minimo ${formatCLP(info.minimumPrice)}`,
       ),
     ].join("\n");
 
@@ -1062,6 +1405,13 @@ export default function Productos() {
         className="hidden"
         onChange={handleFileImport}
       />
+      <input
+        ref={pricingFileInputRef}
+        type="file"
+        accept=".xlsx,.xls"
+        className="hidden"
+        onChange={handlePricingFileImport}
+      />
 
       <div className="rounded-[28px] border border-violet-400 bg-white px-6 py-5 shadow-sm">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -1120,6 +1470,7 @@ export default function Productos() {
                 <div className="absolute right-0 top-12 z-50 w-56 overflow-hidden rounded-2xl border border-slate-100 bg-white py-1 shadow-2xl shadow-slate-200/40 ring-1 ring-black/[0.04]">
                   {[
                     { icon: Download, label: "Exportar inventario", action: handleExportInventory },
+                    { icon: Calculator, label: "Importar calculadora precios", action: handlePricingImportClick },
                     { icon: RefreshCw, label: "Importar desde Mocha", action: handleImportFromMocha },
                     {
                       icon: ImageIcon,
@@ -1135,6 +1486,14 @@ export default function Productos() {
                       icon: Truck,
                       label: showLogisticsPanel ? "Ocultar costo logístico" : "Costo logístico",
                       action: handleViewLogisticsPanel,
+                    },
+                    {
+                      icon: TrendingUp,
+                      label: showProfitPanel ? "Ocultar rentabilidad" : "Rentabilidad",
+                      action: () => {
+                        setShowProfitPanel((current) => !current);
+                        setMenuOpen(false);
+                      },
                     },
                     { icon: FileText, label: "Generar reporte", action: handleGenerateReport },
                     { icon: RotateCcw, label: "Restaurar demo", action: handleRestoreDemo },
@@ -1241,6 +1600,24 @@ export default function Productos() {
           Logística estimada: {formatCLP(logisticsMetrics.totalCost)}
         </button>
 
+        <button
+          onClick={() => setShowProfitPanel(true)}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-[12px] font-semibold text-indigo-700 transition-colors hover:bg-indigo-100"
+        >
+          <TrendingUp className="h-3.5 w-3.5" />
+          Utilidad: {formatCLP(profitMetrics.totalGrossProfit)}
+        </button>
+
+        {(profitMetrics.negative > 0 || profitMetrics.low > 0 || profitMetrics.missing > 0) && (
+          <button
+            onClick={() => setShowProfitPanel(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-[12px] font-semibold text-rose-600 transition-colors hover:bg-rose-100"
+          >
+            <AlertTriangle className="h-3.5 w-3.5" />
+            {profitMetrics.negative + profitMetrics.low + profitMetrics.missing} con margen por revisar
+          </button>
+        )}
+
         {alerts.offers > 0 && (
           <button
             onClick={() => setOfferFilter("Con oferta")}
@@ -1290,6 +1667,12 @@ export default function Productos() {
           {showLogisticsPanel && (
             <p className="rounded-full bg-emerald-50 px-3 py-1 text-[12px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
               Costo logístico activo, corte {formatCLP(LOGISTICS_PRICE_LIMIT)}
+            </p>
+          )}
+
+          {showProfitPanel && (
+            <p className="rounded-full bg-indigo-50 px-3 py-1 text-[12px] font-semibold text-indigo-700 ring-1 ring-indigo-200">
+              Rentabilidad activa, comisión {DEFAULT_COMMISSION_RATE}%
             </p>
           )}
 
@@ -1520,6 +1903,119 @@ export default function Productos() {
                 >
                   <FilePenLine className="h-4 w-4" />
                   Editar nivel
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {showProfitPanel && profitRows.length > 0 && (
+        <section className="mt-5 overflow-hidden rounded-[22px] border border-indigo-200 bg-white shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-indigo-100 bg-indigo-50/70 px-4 py-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-100 text-indigo-700">
+                <TrendingUp className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-[15px] font-black text-slate-900">Rentabilidad por producto</h2>
+                <p className="text-[12px] text-slate-500">
+                  Calcula costo, comisión, cofinanciamiento, logística, utilidad y precio recomendado.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full bg-white px-3 py-1 text-[12px] font-bold text-indigo-700 ring-1 ring-indigo-100">
+                Bruta {formatCLP(profitMetrics.totalGrossProfit)}
+              </span>
+              <span className="rounded-full bg-white px-3 py-1 text-[12px] font-bold text-slate-700 ring-1 ring-indigo-100">
+                Neta est. {formatCLP(profitMetrics.totalNetProfit)}
+              </span>
+              <button
+                onClick={() => setShowProfitPanel(false)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-[12px] font-semibold text-indigo-700 transition-colors hover:bg-indigo-50"
+              >
+                <X className="h-3.5 w-3.5" />
+                Cerrar
+              </button>
+            </div>
+          </div>
+
+          <div className="max-h-[500px] overflow-y-auto divide-y divide-slate-100">
+            {profitRows.map(({ product, info }) => (
+              <div
+                key={product.id}
+                className="grid grid-cols-1 gap-3 px-4 py-3 transition-colors hover:bg-slate-50 xl:grid-cols-[minmax(0,1fr)_112px_112px_112px_118px_128px_128px_138px] xl:items-center"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-[13px] font-bold text-slate-900">{product.name}</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                    <span className="rounded-md bg-slate-100 px-2 py-0.5 font-mono text-slate-600">
+                      SKU {product.sku}
+                    </span>
+                    <span>{info.profile}</span>
+                    <span>{info.commissionRate}% + {info.cofinancingRate}%</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 xl:block">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400 xl:block">
+                    Precio
+                  </span>
+                  <span className="text-[12px] font-black text-slate-900">{formatCLP(product.price)}</span>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 xl:block">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400 xl:block">
+                    Costos
+                  </span>
+                  <span className="text-[12px] font-black text-slate-900">{formatCLP(info.totalCost)}</span>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 xl:block">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400 xl:block">
+                    Utilidad
+                  </span>
+                  <span className={`text-[12px] font-black ${info.grossProfit < 0 ? "text-rose-600" : "text-slate-900"}`}>
+                    {formatCLP(info.grossProfit)}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 xl:block">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400 xl:block">
+                    Margen
+                  </span>
+                  <span
+                    className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold ${getProfitBadgeClass(
+                      info.statusTone,
+                    )}`}
+                  >
+                    {info.statusLabel}
+                  </span>
+                  <p className="mt-1 text-[12px] font-black text-slate-900">{formatPercent(info.grossMargin)}</p>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 xl:block">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400 xl:block">
+                    Mínimo
+                  </span>
+                  <span className="text-[12px] font-black text-slate-900">{formatCLP(info.minimumPrice)}</span>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 xl:block">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400 xl:block">
+                    Campaña
+                  </span>
+                  <span className="text-[12px] font-black text-slate-900">{formatCLP(info.lowSeasonPrice)}</span>
+                </div>
+
+                <button
+                  onClick={() => openEditProduct(product)}
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 text-[12.5px] font-bold text-white shadow-sm shadow-indigo-300/30 transition-colors hover:bg-indigo-700"
+                >
+                  <FilePenLine className="h-4 w-4" />
+                  Ajustar precio
                 </button>
               </div>
             ))}
@@ -1933,6 +2429,110 @@ export default function Productos() {
                         {draftLogistics.margin !== undefined ? formatCLP(draftLogistics.margin) : "Sin calcular"}
                       </p>
                     </div>
+                  </div>
+                </section>
+
+                <section className="rounded-3xl border border-indigo-100 bg-white/80 p-5 shadow-sm">
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-[18px] font-black text-slate-900">
+                      <TrendingUp className="h-5 w-5 text-indigo-600" />
+                      Rentabilidad
+                    </div>
+                    <span
+                      className={`rounded-full border px-3 py-1 text-[12px] font-black ${getProfitBadgeClass(
+                        draftProfit.statusTone,
+                      )}`}
+                    >
+                      {draftProfit.statusLabel}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                    <label>
+                      <span className="text-[12px] font-bold text-slate-600">Perfil</span>
+                      <select
+                        value={draft.pricingProfile}
+                        onChange={(event) => {
+                          const profile = normalizePricingProfile(event.target.value);
+                          updateDraft("pricingProfile", profile);
+                          updateDraft("cofinancingRate", String(getDefaultCofinancingRate(profile)));
+                        }}
+                        className="mt-2 h-12 w-full rounded-2xl border border-indigo-100 bg-white px-4 text-[14px] font-bold text-slate-800 outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100"
+                      >
+                        <option value="4/5 estrellas">4/5 estrellas</option>
+                        <option value="3 estrellas">3 estrellas</option>
+                        <option value="Personalizado">Personalizado</option>
+                      </select>
+                    </label>
+
+                    <label>
+                      <span className="text-[12px] font-bold text-slate-600">Comisión %</span>
+                      <input
+                        inputMode="decimal"
+                        value={draft.commissionRate}
+                        onChange={(event) => updateDraft("commissionRate", event.target.value)}
+                        className="mt-2 h-12 w-full rounded-2xl border border-indigo-100 bg-white px-4 text-[16px] font-black text-slate-900 outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100"
+                      />
+                    </label>
+
+                    <label>
+                      <span className="text-[12px] font-bold text-slate-600">Cofinanciamiento %</span>
+                      <input
+                        inputMode="decimal"
+                        value={draft.cofinancingRate}
+                        onChange={(event) => {
+                          updateDraft("cofinancingRate", event.target.value);
+                          updateDraft("pricingProfile", "Personalizado");
+                        }}
+                        className="mt-2 h-12 w-full rounded-2xl border border-indigo-100 bg-white px-4 text-[16px] font-black text-slate-900 outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-1 gap-3 text-[13px] md:grid-cols-4">
+                    <div className="rounded-2xl bg-slate-50 px-4 py-3">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Utilidad bruta</p>
+                      <p className={`mt-1 text-[18px] font-black ${draftProfit.grossProfit < 0 ? "text-rose-600" : "text-slate-900"}`}>
+                        {formatCLP(draftProfit.grossProfit)}
+                      </p>
+                    </div>
+                    <div className="rounded-2xl bg-slate-50 px-4 py-3">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Margen bruto</p>
+                      <p className="mt-1 text-[18px] font-black text-slate-900">
+                        {formatPercent(draftProfit.grossMargin)}
+                      </p>
+                    </div>
+                    <div className="rounded-2xl bg-slate-50 px-4 py-3">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Utilidad neta est.</p>
+                      <p className={`mt-1 text-[18px] font-black ${draftProfit.netProfit < 0 ? "text-rose-600" : "text-slate-900"}`}>
+                        {formatCLP(draftProfit.netProfit)}
+                      </p>
+                    </div>
+                    <div className="rounded-2xl bg-slate-50 px-4 py-3">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Precio mínimo</p>
+                      <p className="mt-1 text-[18px] font-black text-slate-900">
+                        {formatCLP(draftProfit.minimumPrice)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4">
+                    {[
+                      ["Medio", draftProfit.mediumMarginPrice],
+                      ["CMR/envío", draftProfit.cmrOrFreeShippingPrice],
+                      ["Temp. baja", draftProfit.lowSeasonPrice],
+                      ["Temp. alta", draftProfit.highSeasonPrice],
+                    ].map(([label, value]) => (
+                      <button
+                        key={label}
+                        type="button"
+                        onClick={() => updateDraft("offerPrice2", String(value))}
+                        className="rounded-2xl border border-indigo-100 bg-indigo-50 px-3 py-3 text-left transition hover:border-indigo-300 hover:bg-indigo-100"
+                      >
+                        <p className="text-[10px] font-bold uppercase tracking-wide text-indigo-500">{label}</p>
+                        <p className="mt-1 text-[16px] font-black text-slate-900">{formatCLP(Number(value))}</p>
+                      </button>
+                    ))}
                   </div>
                 </section>
               </div>

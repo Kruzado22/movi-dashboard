@@ -1,5 +1,6 @@
 export type ProductStatus = "Activo" | "Bajo stock" | "Agotado";
 export type LogisticsTier = "5/5" | "4/5" | "3/5" | "2/5";
+export type PricingProfile = "4/5 estrellas" | "3 estrellas" | "Personalizado";
 
 export type Product = {
   id: number;
@@ -20,6 +21,9 @@ export type Product = {
   measurements?: string;
   weight?: string;
   logisticsTier?: LogisticsTier;
+  pricingProfile?: PricingProfile;
+  commissionRate?: number;
+  cofinancingRate?: number;
 };
 
 export type ViewMode = "cards" | "table";
